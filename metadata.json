@@ -1,0 +1,8 @@
+{
+  "name": "gyaan.one - Peer-to-Peer Learning",
+  "description": "A premium community-driven platform for live, student-led mentoring and knowledge exchange.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
