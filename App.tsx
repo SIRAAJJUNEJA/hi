@@ -9,7 +9,16 @@ import {
   signupWithEmail, 
   loginWithGoogle, 
   getUserData, 
-  auth 
+  auth,
+  submitFellowshipApplication,
+  submitFoundingApplication,
+  submitReview,
+  logActivity,
+  getFellowshipApplications,
+  getFoundingApplications,
+  getReviews,
+  getActivityLogs,
+  updateApplicationStatus
 } from './services/backend';
 import { signOut, onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 
@@ -56,7 +65,7 @@ function App() {
   const [userList, setUserList] = useState<UserRecord[]>([]);
   const [applications, setApplications] = useState<FellowshipApplication[]>([]);
   const [foundingApplications, setFoundingApplications] = useState<FoundingCohortApplication[]>([]);
-  const [activeView, setActiveView] = useState<'landing' | 'community' | 'fellowship'>('landing');
+  const [activeView, setActiveView] = useState<'landing' | 'community' | 'sessions' | 'fellowship'>('landing');
   const [adminTab, setAdminTab] = useState<'insights' | 'scholars' | 'fellowship' | 'founding' | 'curriculum'>('insights');
   const [linkingSessionId, setLinkingSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -97,8 +106,34 @@ function App() {
   const [recentActivity, setRecentActivity] = useState<{id: string, type: string, user: string, time: string}[]>([]);
 
   useEffect(() => {
-    const savedActivity = localStorage.getItem('gyaan_activity');
-    if (savedActivity) setRecentActivity(JSON.parse(savedActivity));
+    // Load data from Firestore
+    const loadData = async () => {
+      try {
+        const [apps, founding, revs, logs] = await Promise.all([
+          getFellowshipApplications(),
+          getFoundingApplications(),
+          getReviews(),
+          getActivityLogs()
+        ]);
+        setApplications(apps);
+        setFoundingApplications(founding);
+        setReviews(revs);
+        setRecentActivity(logs);
+      } catch (error) {
+        console.error("Error loading data from Firestore:", error);
+        // Fallback to localStorage if Firestore fails
+        const savedActivity = localStorage.getItem('gyaan_activity');
+        if (savedActivity) setRecentActivity(JSON.parse(savedActivity));
+        
+        const savedApps = localStorage.getItem('gyaan_applications');
+        if (savedApps) setApplications(JSON.parse(savedApps));
+
+        const savedFounding = localStorage.getItem('gyaan_founding_applications');
+        if (savedFounding) setFoundingApplications(JSON.parse(savedFounding));
+      }
+    };
+
+    loadData();
     
     const savedUsers = localStorage.getItem('gyaan_users');
     if (savedUsers) {
@@ -225,6 +260,11 @@ function App() {
     setCurrentUser(newUser);
     localStorage.setItem('gyaan_active_user', JSON.stringify(newUser));
 
+    // Save user to Firestore
+    const { setDoc, doc } = await import('firebase/firestore');
+    const { db } = await import('./services/backend');
+    await setDoc(doc(db, "users", newUser.uid), newUser);
+
     // Log Activity
     const activity = {
       id: Math.random().toString(36).substr(2, 9),
@@ -235,6 +275,9 @@ function App() {
     const updatedActivity = [activity, ...recentActivity].slice(0, 10);
     setRecentActivity(updatedActivity);
     localStorage.setItem('gyaan_activity', JSON.stringify(updatedActivity));
+    
+    // Save to Firestore
+    logActivity(activity);
 
     triggerSuccess();
   };
@@ -275,12 +318,16 @@ function App() {
     const updatedReviews = [newReview, ...reviews];
     setReviews(updatedReviews);
     localStorage.setItem('gyaan_reviews', JSON.stringify(updatedReviews));
+    
+    // Save to Firestore
+    submitReview(newReview);
+
     setReviewComment('');
     setReviewRating(5);
     triggerSuccess();
   };
 
-  const adminHandleApplication = (id: string, action: 'APPROVED' | 'REJECTED') => {
+  const adminHandleApplication = async (id: string, action: 'APPROVED' | 'REJECTED') => {
     const updatedApps = applications.map(app => {
       if (app.id === id) {
         if (action === 'APPROVED') {
@@ -294,9 +341,12 @@ function App() {
     });
     setApplications(updatedApps);
     localStorage.setItem('gyaan_applications', JSON.stringify(updatedApps));
+    
+    // Update in Firestore
+    await updateApplicationStatus("fellowship_applications", id, action);
   };
 
-  const adminHandleFoundingApplication = (id: string, action: 'APPROVED' | 'REJECTED') => {
+  const adminHandleFoundingApplication = async (id: string, action: 'APPROVED' | 'REJECTED') => {
     const updatedApps = foundingApplications.map(app => {
       if (app.id === id) {
         return { ...app, status: action };
@@ -305,6 +355,9 @@ function App() {
     });
     setFoundingApplications(updatedApps);
     localStorage.setItem('gyaan_founding_applications', JSON.stringify(updatedApps));
+    
+    // Update in Firestore
+    await updateApplicationStatus("founding_applications", id, action);
   };
 
   const handleFellowshipSubmit = (e: React.FormEvent) => {
@@ -319,6 +372,7 @@ function App() {
       education: formData.get('education') as string,
       expertise: formData.get('expertise') as string,
       narrative: formData.get('narrative') as string,
+      linkedinUrl: formData.get('linkedinUrl') as string || undefined,
       status: 'PENDING',
       submittedAt: new Date().toLocaleDateString()
     };
@@ -327,6 +381,9 @@ function App() {
     setApplications(updatedApps);
     localStorage.setItem('gyaan_applications', JSON.stringify(updatedApps));
     
+    // Save to Firestore
+    submitFellowshipApplication(newApp);
+
     triggerSuccess();
   };
 
@@ -350,6 +407,9 @@ function App() {
     setFoundingApplications(updatedApps);
     localStorage.setItem('gyaan_founding_applications', JSON.stringify(updatedApps));
     
+    // Save to Firestore
+    submitFoundingApplication(newApp);
+
     triggerSuccess();
   };
 
@@ -413,6 +473,7 @@ function App() {
         <div className="hidden md:flex space-x-10 text-xs uppercase tracking-widest font-semibold text-gray-500">
           <button onClick={() => { setActiveView('landing'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'landing' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Home</button>
           <button onClick={() => { setActiveView('community'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'community' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Community</button>
+          <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'sessions' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Sessions</button>
           <button onClick={() => { setActiveView('fellowship'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'fellowship' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Fellowship</button>
           {(currentUser?.isAdmin || currentUser?.email?.toLowerCase() === ADMIN_EMAIL) && (
             <button onClick={() => setModalType('admin')} className="text-[#C5A059] font-bold bg-[#C5A059]/10 px-4 py-1.5 rounded-full hover:bg-[#C5A059]/20 transition">Admin Dashboard</button>
@@ -450,11 +511,12 @@ function App() {
                   <span className="italic font-normal text-[#C5A059]">redefined.</span>
                 </h1>
                 <p className="text-lg md:text-xl text-gray-500 max-w-2xl mx-auto mb-12 leading-relaxed font-light">
-                  Experience curated workshops led by the next generation of academic leaders. 
-                  Pure knowledge exchange, designed for those who seek depth over convenience.
+                  A peer-led platform powered by students from India’s top IITs and IIMs.
+                  <br />
+                  Practical strategies, not textbook theory.
                 </p>
                 <div className="flex flex-col sm:flex-row justify-center gap-6">
-                  <button onClick={() => scrollToSection('workshops')} className="bg-[#1A2238] text-white px-10 py-4 rounded-2xl font-bold text-sm tracking-widest uppercase hover:scale-105 transition shadow-xl active:scale-95">
+                  <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className="bg-[#1A2238] text-white px-10 py-4 rounded-2xl font-bold text-sm tracking-widest uppercase hover:scale-105 transition shadow-xl active:scale-95">
                     Explore Masterclasses
                   </button>
                   <button onClick={() => setModalType('apply')} className="border border-[#1A2238] px-10 py-4 rounded-2xl font-bold text-sm tracking-widest uppercase hover:bg-[#1A2238] hover:text-white transition text-[#1A2238] active:scale-95">
@@ -542,35 +604,6 @@ function App() {
                 </div>
               </div>
             </section>
-
-            <section id="workshops" className="bg-white py-24 md:py-32">
-              <div className="max-w-6xl mx-auto px-6">
-                <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
-                  <div className="text-left animate-in">
-                    <h2 className="text-4xl md:text-5xl font-playfair font-bold mb-4 text-[#1A2238]">Active Dialogues</h2>
-                    <p className="text-gray-400 text-lg font-light">Live learning environments curated for intellectual rigor.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2 animate-in">
-                    {categories.map(cat => (
-                      <button key={cat} onClick={() => setFilter(cat)} className={`px-5 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${filter === cat ? 'bg-[#1A2238] text-white shadow-xl -translate-y-1' : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12 stagger-container">
-                  {filteredSessions.map(session => (
-                    <SessionCard 
-                      key={session.id} 
-                      session={session} 
-                      onSelect={(s) => { setSelectedSession(s); setModalType('session'); }}
-                      reviews={getSessionReviews(session.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            </section>
           </>
         )}
 
@@ -579,6 +612,37 @@ function App() {
             <h2 className="text-4xl font-playfair font-bold text-[#1A2238]">Community Dialogue Hub</h2>
             <p className="text-gray-400 mt-4 font-light">Peer-to-peer discussion boards are initializing for current scholars.</p>
           </div>
+        )}
+
+        {activeView === 'sessions' && (
+          <section className="bg-white py-24 md:py-32 animate-in">
+            <div className="max-w-6xl mx-auto px-6">
+              <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
+                <div className="text-left">
+                  <h2 className="text-4xl md:text-5xl font-playfair font-bold mb-4 text-[#1A2238]">Active Dialogues</h2>
+                  <p className="text-gray-400 text-lg font-light">Live learning environments curated for intellectual rigor.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(cat => (
+                    <button key={cat} onClick={() => setFilter(cat)} className={`px-5 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-[0.15em] transition-all duration-300 ${filter === cat ? 'bg-[#1A2238] text-white shadow-xl -translate-y-1' : 'bg-gray-50 text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12 stagger-container">
+                {filteredSessions.map(session => (
+                  <SessionCard 
+                    key={session.id} 
+                    session={session} 
+                    onSelect={(s) => { setSelectedSession(s); setModalType('session'); }}
+                    reviews={getSessionReviews(session.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          </section>
         )}
 
         {activeView === 'fellowship' && (
@@ -629,6 +693,7 @@ function App() {
             <div className="flex gap-8 text-[10px] uppercase tracking-widest font-bold text-gray-400">
               <button onClick={() => { setActiveView('landing'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Home</button>
               <button onClick={() => { setActiveView('community'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Community</button>
+              <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Sessions</button>
               <button onClick={() => { setActiveView('fellowship'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Fellowship</button>
             </div>
           </div>
@@ -921,6 +986,12 @@ function App() {
                           <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Contact Details</p>
                           <p className="text-sm text-[#1A2238] font-medium">{app.email}</p>
                           <p className="text-sm text-[#1A2238] font-medium">{app.phone}</p>
+                          {app.linkedinUrl && (
+                            <a href={app.linkedinUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[#7FB5B5] hover:underline flex items-center gap-1">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                              LinkedIn Profile
+                            </a>
+                          )}
                         </div>
                         <div className="space-y-1">
                           <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Education Background</p>
@@ -1272,6 +1343,11 @@ function App() {
           <div className="space-y-1">
             <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Domain of Expertise *</label>
             <input name="expertise" placeholder="E.g., Quantum Physics, Renaissance Art" required className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]" />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">LinkedIn URL (Optional)</label>
+            <input name="linkedinUrl" placeholder="https://linkedin.com/in/yourprofile" className="w-full bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]" />
           </div>
 
           <div className="space-y-1">

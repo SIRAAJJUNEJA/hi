@@ -29,18 +29,22 @@ import {
   addDoc
 } from "firebase/firestore";
 import { getAnalytics, logEvent } from "firebase/analytics";
-import { UserRecord, UserRole, Session, FellowshipApplication, AdminLog, AnalyticsSnapshot } from "../types";
+import { UserRecord, UserRole, Session, FellowshipApplication, FoundingCohortApplication, Review, AdminLog, AnalyticsSnapshot } from "../types";
 
 // PROD CONFIG: Use environment variables for client-side access
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKeyForArchitectureOnly",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "gyaan-forum.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "gyaan-forum",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "gyaan-forum.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789:web:abcdef",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-123456789"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_API_KEY : null) || "AIzaSyDummyKeyForArchitectureOnly",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_AUTH_DOMAIN : null) || "gyaan-forum.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_PROJECT_ID : null) || "gyaan-forum",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_STORAGE_BUCKET : null) || "gyaan-forum.appspot.com",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_MESSAGING_SENDER_ID : null) || "123456789",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_APP_ID : null) || "1:123456789:web:abcdef",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || (typeof process !== 'undefined' ? process.env.VITE_FIREBASE_MEASUREMENT_ID : null) || "G-123456789"
 };
+
+if (firebaseConfig.apiKey === "AIzaSyDummyKeyForArchitectureOnly") {
+  console.warn("Firebase is running with dummy configuration. Please ensure environment variables are set.");
+}
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -94,6 +98,73 @@ export const trackAttendance = async (uid: string, sessionId: string) => {
     attendedUids: arrayUnion(uid)
   });
   if (analytics) logEvent(analytics, 'session_attended', { sessionId });
+};
+
+/* APPLICATIONS & REVIEWS */
+
+export const submitFellowshipApplication = async (app: FellowshipApplication) => {
+  try {
+    await setDoc(doc(db, "fellowship_applications", app.id), app);
+    console.log("Fellowship application submitted to Firestore successfully");
+  } catch (error) {
+    console.error("Error submitting fellowship application to Firestore:", error);
+    throw error;
+  }
+};
+
+export const submitFoundingApplication = async (app: FoundingCohortApplication) => {
+  try {
+    await setDoc(doc(db, "founding_applications", app.id), app);
+    console.log("Founding application submitted to Firestore successfully");
+  } catch (error) {
+    console.error("Error submitting founding application to Firestore:", error);
+    throw error;
+  }
+};
+
+export const submitReview = async (review: Review) => {
+  try {
+    await setDoc(doc(db, "reviews", review.id), review);
+    console.log("Review submitted to Firestore successfully");
+  } catch (error) {
+    console.error("Error submitting review to Firestore:", error);
+    throw error;
+  }
+};
+
+export const logActivity = async (activity: {id: string, type: string, user: string, time: string}) => {
+  try {
+    await addDoc(collection(db, "activity_logs"), activity);
+    console.log("Activity logged to Firestore successfully");
+  } catch (error) {
+    console.error("Error logging activity to Firestore:", error);
+  }
+};
+
+export const getFellowshipApplications = async (): Promise<FellowshipApplication[]> => {
+  const snap = await getDocs(collection(db, "fellowship_applications"));
+  return snap.docs.map(d => d.data() as FellowshipApplication);
+};
+
+export const getFoundingApplications = async (): Promise<FoundingCohortApplication[]> => {
+  const snap = await getDocs(collection(db, "founding_applications"));
+  return snap.docs.map(d => d.data() as FoundingCohortApplication);
+};
+
+export const getReviews = async (): Promise<Review[]> => {
+  const snap = await getDocs(collection(db, "reviews"));
+  return snap.docs.map(d => d.data() as Review);
+};
+
+export const getActivityLogs = async (): Promise<any[]> => {
+  const q = query(collection(db, "activity_logs"), orderBy("time", "desc"), limit(10));
+  const snap = await getDocs(q);
+  return snap.docs.map(d => d.data());
+};
+
+export const updateApplicationStatus = async (collectionName: string, id: string, status: string) => {
+  const ref = doc(db, collectionName, id);
+  await updateDoc(ref, { status });
 };
 
 /* ADMIN DASHBOARD SERVICES */

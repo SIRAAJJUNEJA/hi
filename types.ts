@@ -55,6 +55,7 @@ export interface FellowshipApplication {
   expertise: string;
   education: string;
   narrative?: string;
+  linkedinUrl?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   submittedAt: string;
 }
