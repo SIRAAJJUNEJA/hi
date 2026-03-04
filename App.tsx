@@ -72,15 +72,25 @@ function App() {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [successTitle, setSuccessTitle] = useState('Application Received');
+  const [successMessage, setSuccessMessage] = useState('Thanks for showing interest at gyaan.one, we will get back to you shortly.');
 
-  const triggerSuccess = () => {
+  const triggerSuccess = (title?: string, message?: string) => {
+    if (title) setSuccessTitle(title);
+    if (message) setSuccessMessage(message);
     setShowSuccess(true);
     setModalType(null);
-    setActiveView('landing');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    
     setTimeout(() => {
       setShowSuccess(false);
-    }, 4000);
+      setActiveView('landing');
+      // Reset to defaults after hiding
+      setTimeout(() => {
+        setSuccessTitle('Application Received');
+        setSuccessMessage('Thanks for showing interest at gyaan.one, we will get back to you shortly.');
+      }, 500);
+    }, 3000);
   };
 
   // Buffer States
@@ -260,11 +270,6 @@ function App() {
     setCurrentUser(newUser);
     localStorage.setItem('gyaan_active_user', JSON.stringify(newUser));
 
-    // Save user to Firestore
-    const { setDoc, doc } = await import('firebase/firestore');
-    const { db } = await import('./services/backend');
-    await setDoc(doc(db, "users", newUser.uid), newUser);
-
     // Log Activity
     const activity = {
       id: Math.random().toString(36).substr(2, 9),
@@ -279,7 +284,10 @@ function App() {
     // Save to Firestore
     logActivity(activity);
 
-    triggerSuccess();
+    triggerSuccess(
+      "Thanks for registering at gyaan.one",
+      "Feel free to register for your favourite masterclasses in the Sessions Tab"
+    );
   };
 
   const handleGoogleAuth = async () => {
@@ -503,7 +511,7 @@ function App() {
               <div className="max-w-6xl mx-auto px-6 text-center relative z-10 animate-scale">
                 <div className="inline-block py-1 px-4 mb-6 rounded-full bg-[#7FB5B5]/10 border border-[#7FB5B5]/20">
                   <span className="text-[#7FB5B5] font-bold tracking-[0.2em] uppercase text-[10px]">
-                    A Collective for Intellectual Growth
+                    Built for the Ambitious
                   </span>
                 </div>
                 <h1 className="text-5xl md:text-8xl mt-4 mb-8 leading-tight font-playfair font-bold text-[#1A2238]">
@@ -1369,9 +1377,9 @@ function App() {
               <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#C5A059" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
             </div>
             <div className="space-y-4">
-              <h2 className="text-2xl font-playfair font-bold text-[#1A2238]">Application Received</h2>
+              <h2 className="text-2xl font-playfair font-bold text-[#1A2238] leading-tight">{successTitle}</h2>
               <p className="text-gray-500 font-light leading-relaxed">
-                Thanks for showing interest at gyaan.one, we will get back to you shortly.
+                {successMessage}
               </p>
               <div className="pt-4">
                 <p className="text-[10px] uppercase tracking-[0.3em] font-bold text-[#C5A059]">Built for the ambitious</p>
@@ -1379,7 +1387,7 @@ function App() {
             </div>
             <div className="pt-4">
               <div className="h-1 w-24 bg-gray-100 rounded-full mx-auto overflow-hidden">
-                <div className="h-full bg-[#C5A059] animate-[loading_4s_linear_forwards]" />
+                <div className="h-full bg-[#C5A059] animate-[loading_3s_linear_forwards]" />
               </div>
             </div>
           </div>
