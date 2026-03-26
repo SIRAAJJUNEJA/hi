@@ -61,14 +61,14 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
 };
 
 const DEFAULT_SITE_SETTINGS: SiteSettings = {
-  heroTitle: "Peer-to-Peer Learning",
-  heroSubtitle: "Democratizing Knowledge",
-  heroDescription: "Connect with top-tier scholars from IITs, IIMs, and global institutions for high-impact learning sessions and mentorship.",
-  communityTitle: "The Gyaan Community",
-  communityDescription: "A network of ambitious learners and expert mentors collaborating to push the boundaries of knowledge.",
-  fellowshipTitle: "Gyaan Fellowship",
-  fellowshipDescription: "Join our elite fellowship program to gain exclusive access to research opportunities and advanced masterclasses.",
-  footerText: "© 2026 Gyaan.one. All rights reserved. Empowering the next generation of scholars."
+  heroTitle: "Peer-led learning,",
+  heroSubtitle: "redefined.",
+  heroDescription: "A peer-led platform powered by students from India’s top IITs and IIMs.\nPractical strategies, not textbook theory.",
+  communityTitle: "Community Dialogue Hub",
+  communityDescription: "Peer-to-peer discussion boards are initializing for current scholars.",
+  fellowshipTitle: "Gyaan.one Fellowship",
+  fellowshipDescription: "The Gyaan.one Fellowship is a highly selective program for individuals who want to play a meaningful role in shaping ambitious students. Fellows become key contributors to our academic community and work closely with the core team to create real impact.",
+  footerText: "© 2026 Gyaan.one. All rights reserved."
 };
 
 function App() {
@@ -676,10 +676,10 @@ function App() {
                   </span>
                 </div>
                 <h1 className="text-5xl md:text-8xl mt-4 mb-8 leading-tight font-playfair font-bold text-[#1A2238]">
-                  {siteSettings.heroTitle.split(',')[0]}, <br className="hidden md:block" />
-                  <span className="italic font-normal text-[#C5A059]">{siteSettings.heroTitle.split(',')[1] || siteSettings.heroSubtitle}</span>
+                  {siteSettings.heroTitle} <br className="hidden md:block" />
+                  <span className="italic font-normal text-[#C5A059]">{siteSettings.heroSubtitle}</span>
                 </h1>
-                <p className="text-lg md:text-xl text-gray-500 max-w-2xl mx-auto mb-12 leading-relaxed font-light">
+                <p className="text-lg md:text-xl text-gray-500 max-w-2xl mx-auto mb-12 leading-relaxed font-light whitespace-pre-line">
                   {siteSettings.heroDescription}
                 </p>
                 <div className="flex flex-col sm:flex-row justify-center gap-6">
@@ -1478,7 +1478,7 @@ function App() {
                     <h4 className="text-xs font-bold uppercase tracking-widest text-[#C5A059]">Hero Section</h4>
                     <div className="space-y-4">
                       <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Title (Use comma for italic part)</label>
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Title (Main Part)</label>
                         <input 
                           value={editSettingsBuffer.heroTitle} 
                           onChange={e => setEditSettingsBuffer({...editSettingsBuffer, heroTitle: e.target.value})}
@@ -1486,7 +1486,7 @@ function App() {
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Subtitle (Fallback)</label>
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Subtitle (Italic Part)</label>
                         <input 
                           value={editSettingsBuffer.heroSubtitle} 
                           onChange={e => setEditSettingsBuffer({...editSettingsBuffer, heroSubtitle: e.target.value})}
