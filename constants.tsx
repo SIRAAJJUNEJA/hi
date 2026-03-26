@@ -4,7 +4,7 @@ import { Session } from './types';
 export const INITIAL_SESSIONS: Session[] = [
   {
     id: '1',
-    title: 'Strategic Game Theory in Emerging Markets',
+    title: 'The Science Behind Successful Marketing',
     category: 'Economics',
     timeLabel: 'LIVE @ 6:00 PM',
     status: 'LIVE',

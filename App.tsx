@@ -10,6 +10,7 @@ import {
   loginWithGoogle, 
   getUserData, 
   auth,
+  db,
   submitFellowshipApplication,
   submitFoundingApplication,
   submitReview,
@@ -27,6 +28,7 @@ import {
   updateSiteSettings
 } from './services/backend';
 import { signOut, onAuthStateChanged, getRedirectResult } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
 const ADMIN_EMAIL = 'siraajjuneja1@gmail.com'.toLowerCase();
 
@@ -93,6 +95,8 @@ function App() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [successTitle, setSuccessTitle] = useState('Application Received');
   const [successMessage, setSuccessMessage] = useState('Thanks for showing interest at gyaan.one, we will get back to you shortly.');
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const triggerSuccess = (title?: string, message?: string) => {
     if (title) setSuccessTitle(title);
@@ -110,6 +114,12 @@ function App() {
         setSuccessMessage('Thanks for showing interest at gyaan.one, we will get back to you shortly.');
       }, 500);
     }, 3000);
+  };
+
+  const triggerError = (message: string) => {
+    setErrorMessage(message);
+    setShowError(true);
+    setTimeout(() => setShowError(false), 5000);
   };
 
   // Buffer States
@@ -136,10 +146,8 @@ function App() {
   const isCloudActive = currentUser && currentUser.uid !== 'admin-vault-id' && currentUser.email?.toLowerCase() === ADMIN_EMAIL;
 
   const handleHardRefresh = () => {
-    if (confirm("This will clear your local cache and reload the website. Continue?")) {
-      localStorage.clear();
-      window.location.reload();
-    }
+    localStorage.clear();
+    window.location.reload();
   };
 
   useEffect(() => {
@@ -263,12 +271,27 @@ function App() {
     if (auth) {
       unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
         if (firebaseUser) {
-          const userData = await getUserData(firebaseUser.uid);
-          if (userData) {
-            const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
-            setCurrentUser(userWithAdmin);
-            localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
+          let userData = await getUserData(firebaseUser.uid);
+          
+          // If user doesn't exist in Firestore, create their record
+          if (!userData) {
+            userData = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Scholar',
+              date: new Date().toLocaleDateString(),
+              role: (firebaseUser.email?.toLowerCase() === ADMIN_EMAIL) ? 'admin' : 'member',
+              lastLogin: Date.now()
+            };
+            // Save to Firestore
+            if (db) {
+              await setDoc(doc(db, "users", firebaseUser.uid), userData);
+            }
           }
+
+          const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
+          setCurrentUser(userWithAdmin);
+          localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
         }
       });
     }
@@ -340,24 +363,18 @@ function App() {
         return;
       }
 
-      const confirmAuth = confirm("Vault Access: To save changes globally to the cloud, you must be signed in with your administrator Google account. Would you like to sign in now?");
-      if (confirmAuth) {
-        handleGoogleAuth();
-      } else {
-        // Fallback to local admin mode for preview
-        const adminUser: UserRecord = {
-          uid: 'admin-vault-id',
-          email: ADMIN_EMAIL,
-          name: 'Siraaj (Admin - Preview Mode)',
-          date: new Date().toLocaleDateString(),
-          role: 'admin',
-          isAdmin: true
-        };
-        setCurrentUser(adminUser);
-        localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
-        alert("Local Admin Mode Enabled. Note: Changes will NOT be saved to the cloud until you sign in with Google.");
-        setModalType('admin');
-      }
+      // Fallback to local admin mode for preview
+      const adminUser: UserRecord = {
+        uid: 'admin-vault-id',
+        email: ADMIN_EMAIL,
+        name: 'Siraaj (Admin - Preview Mode)',
+        date: new Date().toLocaleDateString(),
+        role: 'admin',
+        isAdmin: true
+      };
+      setCurrentUser(adminUser);
+      localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
+      setModalType('admin');
       setLogoClicks(0);
     }
   };
@@ -548,27 +565,35 @@ function App() {
     };
     
     try {
-      await addSession(sessionToAdd);
+      if (isCloudActive) {
+        await addSession(sessionToAdd);
+      }
       const updated = [sessionToAdd, ...sessions];
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
       setIsAddingNew(false);
       setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' });
+      triggerSuccess("Session Published", "The new session has been added to the curriculum.");
     } catch (error) {
-      alert("Failed to add session to database. Please check your connection.");
+      console.error("Add session error:", error);
+      triggerError("Failed to add session to database. Please check your connection.");
     }
   };
 
   const handleAdminUpdateSession = async (sessionId: string, updates: Partial<Session>) => {
     try {
-      await updateSession(sessionId, updates);
+      if (isCloudActive) {
+        await updateSession(sessionId, updates);
+      }
       const updated = sessions.map(s => s.id === sessionId ? { ...s, ...updates } : s);
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
       setEditingSessionId(null);
       setEditSessionBuffer({});
+      triggerSuccess("Changes Saved", "The session details have been updated.");
     } catch (error) {
-      alert("Failed to update session in database.");
+      console.error("Update session error:", error);
+      triggerError("Failed to update session in database.");
     }
   };
 
@@ -580,14 +605,17 @@ function App() {
   };
 
   const handleAdminDeleteSession = async (sessionId: string) => {
-    if (!confirm("Confirm removal from curriculum?")) return;
     try {
-      await deleteSession(sessionId);
+      if (isCloudActive) {
+        await deleteSession(sessionId);
+      }
       const updated = sessions.filter(s => s.id !== sessionId);
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+      triggerSuccess("Session Deleted", "The session has been removed from the curriculum.");
     } catch (error) {
-      alert("Failed to delete session from database.");
+      console.error("Delete session error:", error);
+      triggerError("Failed to delete session from database.");
     }
   };
 
@@ -992,7 +1020,16 @@ function App() {
         <div className="flex flex-col md:flex-row gap-8 min-h-[600px] text-[#1A2238]">
           <div className="w-full md:w-64 space-y-2 border-r border-gray-50 pr-6">
             {['insights', 'scholars', 'fellowship', 'founding', 'curriculum', 'settings'].map(tab => (
-              <button key={tab} onClick={() => { setAdminTab(tab as any); setEditingSessionId(null); setEditingUserId(null); }} className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition ${adminTab === tab ? 'bg-[#1A2238] text-white shadow-lg' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button 
+                key={tab} 
+                onClick={() => { 
+                  setAdminTab(tab as any); 
+                  setEditingSessionId(null); 
+                  setEditingUserId(null); 
+                  if (tab === 'settings') setEditSettingsBuffer(siteSettings);
+                }} 
+                className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition ${adminTab === tab ? 'bg-[#1A2238] text-white shadow-lg' : 'text-gray-400 hover:bg-gray-50'}`}
+              >
                 {tab === 'scholars' ? 'Scholars Registry' : tab === 'founding' ? 'Founding Cohort' : tab === 'settings' ? 'Site Settings' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
@@ -1027,14 +1064,14 @@ function App() {
                     {isCloudActive ? (
                       <button 
                         onClick={async () => {
-                          if (!confirm("Push all current sessions to the cloud? This will overwrite existing cloud data with your current local state.")) return;
                           try {
                             for (const s of sessions) {
                               await addSession(s);
                             }
-                            alert("Cloud Sync Complete. All devices will now see these changes.");
+                            triggerSuccess("Cloud Sync Complete", "All devices will now see these changes.");
                           } catch (e) {
-                            alert("Sync failed. Check console for details.");
+                            console.error("Sync error:", e);
+                            triggerError("Sync failed. Check console for details.");
                           }
                         }}
                         className="bg-emerald-600 text-white px-10 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-emerald-700 transition shadow-[0_8px_20px_rgba(16,185,129,0.4)] active:scale-95"
@@ -1286,17 +1323,24 @@ function App() {
                 <div className="flex justify-between items-center">
                   <h3 className="text-xl font-playfair font-bold">Curriculum Control</h3>
                   <div className="flex gap-2">
+                    {!isCloudActive && (
+                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition shadow-md">Sign In to Sync</button>
+                    )}
                     <button 
                       onClick={async () => {
                         if (!isCloudActive) {
-                          alert("You are in Local Preview Mode. Please sign in with your Google account (top right or in Insights tab) to sync to the cloud.");
+                          triggerError("Please sign in with your administrator account to sync to the cloud.");
                           return;
                         }
-                        if (!confirm("This will push all current sessions to the cloud. Continue?")) return;
-                        for (const s of sessions) {
-                          await addSession(s);
+                        try {
+                          for (const s of sessions) {
+                            await addSession(s);
+                          }
+                          triggerSuccess("Cloud Sync Complete", "Curriculum has been pushed to the live database.");
+                        } catch (e) {
+                          console.error("Sync error:", e);
+                          triggerError("Sync failed. Check console for details.");
                         }
-                        alert("Cloud Sync Complete.");
                       }}
                       className="bg-[#C5A059] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#B48F48] transition"
                     >
@@ -1422,7 +1466,14 @@ function App() {
                                 </div>
                             </div>
                             <div className="flex gap-2">
-                              <button onClick={() => setEditingSessionId(s.id)} title="Edit Session" className="p-2 bg-gray-50 text-gray-400 hover:text-[#7FB5B5] rounded-lg transition-all">
+                              <button 
+                                onClick={() => {
+                                  setEditingSessionId(s.id);
+                                  setEditSessionBuffer(s);
+                                }} 
+                                title="Edit Session" 
+                                className="p-2 bg-gray-50 text-gray-400 hover:text-[#7FB5B5] rounded-lg transition-all"
+                              >
                                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                               </button>
                               <button onClick={() => setLinkingSessionId(linkingSessionId === s.id ? null : s.id)} title="Link Scholars" className={`p-2 rounded-lg transition-all ${linkingSessionId === s.id ? 'bg-[#C5A059] text-white shadow-md' : 'bg-gray-50 text-gray-400 hover:text-[#C5A059]'}`}>
@@ -1453,24 +1504,30 @@ function App() {
               <div className="animate-in space-y-8">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xl font-playfair font-bold">Global Site Settings</h3>
-                  <button 
-                    onClick={async () => {
-                      if (!isCloudActive) {
-                        alert("Please sign in with your administrator account to save changes globally.");
-                        return;
-                      }
-                      try {
-                        await updateSiteSettings(editSettingsBuffer);
-                        setSiteSettings(editSettingsBuffer);
-                        alert("Site settings updated globally.");
-                      } catch (e) {
-                        alert("Update failed. Check console for details.");
-                      }
-                    }}
-                    className="bg-[#1A2238] text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-[#7FB5B5] transition-all shadow-lg active:scale-95"
-                  >
-                    Save Global Changes
-                  </button>
+                  <div className="flex gap-2">
+                    {!isCloudActive && (
+                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition shadow-md">Sign In to Sync</button>
+                    )}
+                    <button 
+                      onClick={async () => {
+                        if (!isCloudActive) {
+                          triggerError("Please sign in with your administrator account to save changes globally.");
+                          return;
+                        }
+                        try {
+                          await updateSiteSettings(editSettingsBuffer);
+                          setSiteSettings(editSettingsBuffer);
+                          triggerSuccess("Settings Updated", "Global site content has been updated successfully.");
+                        } catch (e) {
+                          console.error("Settings update error:", e);
+                          triggerError("Update failed. Check console for details.");
+                        }
+                      }}
+                      className="bg-[#1A2238] text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-[#7FB5B5] transition-all shadow-lg active:scale-95"
+                    >
+                      Save Global Changes
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1709,6 +1766,16 @@ function App() {
         sessions={sessions} 
         addSession={addSession} 
       />
+
+      {/* ERROR MESSAGE OVERLAY */}
+      {showError && (
+        <div className="fixed bottom-8 right-8 z-[110] animate-in">
+          <div className="bg-red-600 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-4 border border-red-500">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <p className="text-xs font-bold uppercase tracking-widest">{errorMessage}</p>
+          </div>
+        </div>
+      )}
 
       {/* SUCCESS MESSAGE OVERLAY */}
       {showSuccess && (

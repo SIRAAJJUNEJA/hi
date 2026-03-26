@@ -80,18 +80,17 @@ export const Concierge: React.FC<ConciergeProps> = ({
               <button 
                 onClick={async () => {
                   if (!isCloudActive) {
-                    alert("You are in Local Preview Mode. Please sign in with Google to sync.");
+                    setMessages(prev => [...prev, { role: 'model', text: 'You are in Local Preview Mode. Please sign in with Google to sync changes globally.' }]);
                     handleGoogleAuth();
                     return;
                   }
-                  if (!confirm("Push all current sessions to the cloud?")) return;
                   try {
                     for (const s of sessions) {
                       await addSession(s);
                     }
-                    alert("Cloud Sync Complete.");
+                    setMessages(prev => [...prev, { role: 'model', text: 'Cloud Sync Complete. All devices will now see the latest curriculum.' }]);
                   } catch (e) {
-                    alert("Sync failed.");
+                    setMessages(prev => [...prev, { role: 'model', text: 'Sync failed. Please check your connection.' }]);
                   }
                 }}
                 className="w-full bg-emerald-600 text-white py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-700 transition flex items-center justify-center gap-2"
