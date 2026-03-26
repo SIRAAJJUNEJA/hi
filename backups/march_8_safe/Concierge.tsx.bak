@@ -1,25 +1,9 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { chatWithConcierge } from '../services/geminiService';
-import { Message, UserRecord, Session } from '../types';
+import { Message } from '../types';
 
-interface ConciergeProps {
-  currentUser: UserRecord | null;
-  ADMIN_EMAIL: string;
-  isCloudActive: boolean;
-  handleGoogleAuth: () => void;
-  sessions: Session[];
-  addSession: (session: Session) => Promise<void>;
-}
-
-export const Concierge: React.FC<ConciergeProps> = ({ 
-  currentUser, 
-  ADMIN_EMAIL, 
-  isCloudActive, 
-  handleGoogleAuth, 
-  sessions, 
-  addSession 
-}) => {
+export const Concierge: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'model', text: 'Greetings. I am the gyaan.one Concierge. How may I assist your learning journey today?' }
@@ -73,34 +57,6 @@ export const Concierge: React.FC<ConciergeProps> = ({
         </div>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-white/50">
-          {/* Admin Quick Actions */}
-          {(currentUser?.isAdmin || currentUser?.email?.toLowerCase() === ADMIN_EMAIL) && (
-            <div className="bg-emerald-50 border border-emerald-100 p-4 rounded-2xl mb-4">
-              <p className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest mb-2">Admin Quick Actions</p>
-              <button 
-                onClick={async () => {
-                  if (!isCloudActive) {
-                    alert("You are in Local Preview Mode. Please sign in with Google to sync.");
-                    handleGoogleAuth();
-                    return;
-                  }
-                  if (!confirm("Push all current sessions to the cloud?")) return;
-                  try {
-                    for (const s of sessions) {
-                      await addSession(s);
-                    }
-                    alert("Cloud Sync Complete.");
-                  } catch (e) {
-                    alert("Sync failed.");
-                  }
-                }}
-                className="w-full bg-emerald-600 text-white py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-emerald-700 transition flex items-center justify-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>
-                Sync Now
-              </button>
-            </div>
-          )}
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed ${

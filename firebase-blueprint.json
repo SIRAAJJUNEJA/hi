@@ -1,0 +1,103 @@
+{
+  "entities": {
+    "UserRecord": {
+      "title": "User Profile",
+      "description": "User profile data stored in Firestore",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "admin"] },
+        "lastLogin": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["uid", "email", "name", "role"]
+    },
+    "Session": {
+      "title": "Curriculum Session",
+      "description": "A learning session or masterclass",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "timeLabel": { "type": "string" },
+        "mentorName": { "type": "string" },
+        "mentorInst": { "type": "string" },
+        "description": { "type": "string" },
+        "longDescription": { "type": "string" },
+        "zoomLink": { "type": "string" },
+        "status": { "type": "string", "enum": ["UPCOMING", "LIVE", "COMPLETED"] },
+        "avatarUrl": { "type": "string" },
+        "mentorBio": { "type": "string" },
+        "mentorTitle": { "type": "string" }
+      },
+      "required": ["id", "title", "category", "status"]
+    },
+    "FellowshipApplication": {
+      "title": "Fellowship Application",
+      "description": "Application for the fellowship program",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "college": { "type": "string" },
+        "year": { "type": "string" },
+        "linkedin": { "type": "string" },
+        "why": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["id", "name", "email", "phone"]
+    },
+    "SiteSettings": {
+      "title": "Site Settings",
+      "description": "Global website configuration and content",
+      "type": "object",
+      "properties": {
+        "heroTitle": { "type": "string" },
+        "heroSubtitle": { "type": "string" },
+        "heroDescription": { "type": "string" },
+        "communityTitle": { "type": "string" },
+        "communityDescription": { "type": "string" },
+        "fellowshipTitle": { "type": "string" },
+        "fellowshipDescription": { "type": "string" },
+        "footerText": { "type": "string" },
+        "lastUpdated": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserRecord",
+      "description": "User profiles"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "Session",
+      "description": "Curriculum sessions"
+    },
+    "/fellowship_applications/{appId}": {
+      "schema": "FellowshipApplication",
+      "description": "Fellowship applications"
+    },
+    "/founding_applications/{appId}": {
+      "schema": "FoundingCohortApplication",
+      "description": "Founding cohort applications"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "User reviews"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Activity logs"
+    },
+    "/site_settings/{settingId}": {
+      "schema": "SiteSettings",
+      "description": "Global site settings"
+    }
+  }
+}

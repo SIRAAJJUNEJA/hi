@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { SessionCard } from './components/SessionCard';
 import { Concierge } from './components/Concierge';
 import { INITIAL_SESSIONS } from './constants';
-import { Session, Review, UserRecord, FellowshipApplication, FoundingCohortApplication } from './types';
+import { Session, Review, UserRecord, FellowshipApplication, FoundingCohortApplication, SiteSettings } from './types';
 import { 
   loginWithEmail, 
   signupWithEmail, 
@@ -18,7 +18,13 @@ import {
   getFoundingApplications,
   getReviews,
   getActivityLogs,
-  updateApplicationStatus
+  updateApplicationStatus,
+  getSessions,
+  updateSession,
+  addSession,
+  deleteSession,
+  getSiteSettings,
+  updateSiteSettings
 } from './services/backend';
 import { signOut, onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 
@@ -54,8 +60,21 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
   );
 };
 
+const DEFAULT_SITE_SETTINGS: SiteSettings = {
+  heroTitle: "Peer-to-Peer Learning",
+  heroSubtitle: "Democratizing Knowledge",
+  heroDescription: "Connect with top-tier scholars from IITs, IIMs, and global institutions for high-impact learning sessions and mentorship.",
+  communityTitle: "The Gyaan Community",
+  communityDescription: "A network of ambitious learners and expert mentors collaborating to push the boundaries of knowledge.",
+  fellowshipTitle: "Gyaan Fellowship",
+  fellowshipDescription: "Join our elite fellowship program to gain exclusive access to research opportunities and advanced masterclasses.",
+  footerText: "© 2026 Gyaan.one. All rights reserved. Empowering the next generation of scholars."
+};
+
 function App() {
   const [sessions, setSessions] = useState<Session[]>(INITIAL_SESSIONS);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+  const [editSettingsBuffer, setEditSettingsBuffer] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [filter, setFilter] = useState<string>('All');
   const [modalType, setModalType] = useState<'auth' | 'apply' | 'founding' | 'admin' | 'session' | null>(null);
@@ -66,7 +85,7 @@ function App() {
   const [applications, setApplications] = useState<FellowshipApplication[]>([]);
   const [foundingApplications, setFoundingApplications] = useState<FoundingCohortApplication[]>([]);
   const [activeView, setActiveView] = useState<'landing' | 'community' | 'sessions' | 'fellowship'>('landing');
-  const [adminTab, setAdminTab] = useState<'insights' | 'scholars' | 'fellowship' | 'founding' | 'curriculum'>('insights');
+  const [adminTab, setAdminTab] = useState<'insights' | 'scholars' | 'fellowship' | 'founding' | 'curriculum' | 'settings'>('insights');
   const [linkingSessionId, setLinkingSessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -114,21 +133,58 @@ function App() {
 
   const [logoClicks, setLogoClicks] = useState(0);
   const [recentActivity, setRecentActivity] = useState<{id: string, type: string, user: string, time: string}[]>([]);
+  const isCloudActive = currentUser && currentUser.uid !== 'admin-vault-id' && currentUser.email?.toLowerCase() === ADMIN_EMAIL;
+
+  const handleHardRefresh = () => {
+    if (confirm("This will clear your local cache and reload the website. Continue?")) {
+      localStorage.clear();
+      window.location.reload();
+    }
+  };
 
   useEffect(() => {
     // Load data from Firestore
     const loadData = async () => {
       try {
-        const [apps, founding, revs, logs] = await Promise.all([
+        const [apps, founding, revs, logs, firestoreSessions, firestoreSettings] = await Promise.all([
           getFellowshipApplications(),
           getFoundingApplications(),
           getReviews(),
-          getActivityLogs()
+          getActivityLogs(),
+          getSessions(),
+          getSiteSettings()
         ]);
+        
         setApplications(apps);
         setFoundingApplications(founding);
         setReviews(revs);
         setRecentActivity(logs);
+
+        if (firestoreSettings) {
+          setSiteSettings(firestoreSettings);
+          setEditSettingsBuffer(firestoreSettings);
+        } else {
+          // Bootstrap site settings if empty
+          console.log("Bootstrapping Firestore with default site settings...");
+          await updateSiteSettings(DEFAULT_SITE_SETTINGS);
+        }
+
+        // If Firestore has sessions, use them. Otherwise, bootstrap with INITIAL_SESSIONS
+        if (firestoreSessions && firestoreSessions.length > 0) {
+          setSessions(firestoreSessions);
+          localStorage.setItem('gyaan_sessions_registry', JSON.stringify(firestoreSessions));
+        } else {
+          // Bootstrap Firestore with initial data if it's empty
+          console.log("Bootstrapping Firestore with initial sessions...");
+          for (const session of INITIAL_SESSIONS) {
+            try {
+              await addSession(session);
+            } catch (e) {
+              console.error("Error bootstrapping session:", session.id, e);
+            }
+          }
+          setSessions(INITIAL_SESSIONS);
+        }
       } catch (error) {
         console.error("Error loading data from Firestore:", error);
         // Fallback to localStorage if Firestore fails
@@ -140,6 +196,9 @@ function App() {
 
         const savedFounding = localStorage.getItem('gyaan_founding_applications');
         if (savedFounding) setFoundingApplications(JSON.parse(savedFounding));
+
+        const savedSessions = localStorage.getItem('gyaan_sessions_registry');
+        if (savedSessions) setSessions(JSON.parse(savedSessions));
       }
     };
 
@@ -147,64 +206,107 @@ function App() {
     
     const savedUsers = localStorage.getItem('gyaan_users');
     if (savedUsers) {
-      const parsed = JSON.parse(savedUsers);
-      setUserList(parsed.map((u: any) => ({
-        ...u,
-        uid: u.uid || Math.random().toString(36).substr(2, 9),
-        role: u.role || (u.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'member')
-      })));
+      try {
+        const parsed = JSON.parse(savedUsers);
+        if (Array.isArray(parsed)) {
+          setUserList(parsed.map((u: any) => ({
+            ...u,
+            uid: u.uid || Math.random().toString(36).substr(2, 9),
+            role: u.role || (u.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'member')
+          })));
+        }
+      } catch (e) {
+        console.error("Error parsing gyaan_users:", e);
+      }
     }
     
     const savedApps = localStorage.getItem('gyaan_applications');
-    if (savedApps) setApplications(JSON.parse(savedApps));
+    if (savedApps) {
+      try {
+        const parsed = JSON.parse(savedApps);
+        if (Array.isArray(parsed)) setApplications(parsed);
+      } catch (e) {
+        console.error("Error parsing gyaan_applications:", e);
+      }
+    }
 
     const savedFounding = localStorage.getItem('gyaan_founding_applications');
-    if (savedFounding) setFoundingApplications(JSON.parse(savedFounding));
+    if (savedFounding) {
+      try {
+        const parsed = JSON.parse(savedFounding);
+        if (Array.isArray(parsed)) setFoundingApplications(parsed);
+      } catch (e) {
+        console.error("Error parsing gyaan_founding_applications:", e);
+      }
+    }
 
     const activeSession = localStorage.getItem('gyaan_active_user');
     if (activeSession) {
-      const user = JSON.parse(activeSession);
-      const userWithAdmin: UserRecord = { 
-        ...user, 
-        uid: user.uid || Math.random().toString(36).substr(2, 9),
-        role: user.role || (user.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'member'),
-        isAdmin: user.email.toLowerCase() === ADMIN_EMAIL 
-      };
-      setCurrentUser(userWithAdmin);
+      try {
+        const user = JSON.parse(activeSession);
+        if (user && user.email) {
+          const userWithAdmin: UserRecord = { 
+            ...user, 
+            uid: user.uid || Math.random().toString(36).substr(2, 9),
+            role: user.role || (user.email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'member'),
+            isAdmin: user.email.toLowerCase() === ADMIN_EMAIL 
+          };
+          setCurrentUser(userWithAdmin);
+        }
+      } catch (e) {
+        console.error("Error parsing gyaan_active_user:", e);
+      }
     }
 
     // Firebase Auth Listener
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const userData = await getUserData(firebaseUser.uid);
-        if (userData) {
-          const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
-          setCurrentUser(userWithAdmin);
-          localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
+    let unsubscribe = () => {};
+    if (auth) {
+      unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (firebaseUser) {
+          const userData = await getUserData(firebaseUser.uid);
+          if (userData) {
+            const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
+            setCurrentUser(userWithAdmin);
+            localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
+          }
         }
-      }
-    });
+      });
+    }
 
     // Handle Redirect Result
-    getRedirectResult(auth).then(async (result) => {
-      if (result) {
-        const userData = await getUserData(result.user.uid);
-        if (userData) {
-          const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
-          setCurrentUser(userWithAdmin);
-          localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
+    if (auth) {
+      getRedirectResult(auth).then(async (result) => {
+        if (result) {
+          const userData = await getUserData(result.user.uid);
+          if (userData) {
+            const userWithAdmin = { ...userData, isAdmin: userData.email.toLowerCase() === ADMIN_EMAIL };
+            setCurrentUser(userWithAdmin);
+            localStorage.setItem('gyaan_active_user', JSON.stringify(userWithAdmin));
+          }
         }
-      }
-    }).catch(err => console.error("Redirect error:", err));
+      }).catch(err => console.error("Redirect error:", err));
+    }
 
     // Handle Secret URL Access - REMOVED due to 403 issues, moving to Secret Click
     
     const savedReviews = localStorage.getItem('gyaan_reviews');
-    if (savedReviews) setReviews(JSON.parse(savedReviews));
+    if (savedReviews) {
+      try {
+        const parsed = JSON.parse(savedReviews);
+        if (Array.isArray(parsed)) setReviews(parsed);
+      } catch (e) {
+        console.error("Error parsing gyaan_reviews:", e);
+      }
+    }
 
     const savedSessions = localStorage.getItem('gyaan_sessions_registry');
     if (savedSessions) {
-        setSessions(JSON.parse(savedSessions));
+      try {
+        const parsed = JSON.parse(savedSessions);
+        if (Array.isArray(parsed)) setSessions(parsed);
+      } catch (e) {
+        console.error("Error parsing gyaan_sessions_registry:", e);
+      }
     } else {
         localStorage.setItem('gyaan_sessions_registry', JSON.stringify(INITIAL_SESSIONS));
     }
@@ -231,17 +333,31 @@ function App() {
     }
 
     if (newClicks >= 5) {
-      const adminUser: UserRecord = {
-        uid: 'admin-vault-id',
-        email: ADMIN_EMAIL,
-        name: 'Siraaj (Admin)',
-        date: new Date().toLocaleDateString(),
-        role: 'admin',
-        isAdmin: true
-      };
-      setCurrentUser(adminUser);
-      localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
-      alert("Vault Unlocked: Admin Access Granted.");
+      // Check if already authenticated as admin
+      if (currentUser?.email?.toLowerCase() === ADMIN_EMAIL) {
+        setModalType('admin');
+        setLogoClicks(0);
+        return;
+      }
+
+      const confirmAuth = confirm("Vault Access: To save changes globally to the cloud, you must be signed in with your administrator Google account. Would you like to sign in now?");
+      if (confirmAuth) {
+        handleGoogleAuth();
+      } else {
+        // Fallback to local admin mode for preview
+        const adminUser: UserRecord = {
+          uid: 'admin-vault-id',
+          email: ADMIN_EMAIL,
+          name: 'Siraaj (Admin - Preview Mode)',
+          date: new Date().toLocaleDateString(),
+          role: 'admin',
+          isAdmin: true
+        };
+        setCurrentUser(adminUser);
+        localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
+        alert("Local Admin Mode Enabled. Note: Changes will NOT be saved to the cloud until you sign in with Google.");
+        setModalType('admin');
+      }
       setLogoClicks(0);
     }
   };
@@ -302,7 +418,7 @@ function App() {
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
+      if (auth) await signOut(auth);
       localStorage.removeItem('gyaan_active_user');
       setCurrentUser(null);
     } catch (error) {
@@ -421,7 +537,7 @@ function App() {
     triggerSuccess();
   };
 
-  const handleAdminAddSession = (e: React.FormEvent) => {
+  const handleAdminAddSession = async (e: React.FormEvent) => {
     e.preventDefault();
     const sessionToAdd: Session = {
       ...newSession as Session,
@@ -430,19 +546,30 @@ function App() {
       mentorBio: 'Session created via administrator portal.',
       mentorTitle: 'Curriculum Mentor',
     };
-    const updated = [sessionToAdd, ...sessions];
-    setSessions(updated);
-    localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
-    setIsAddingNew(false);
-    setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' });
+    
+    try {
+      await addSession(sessionToAdd);
+      const updated = [sessionToAdd, ...sessions];
+      setSessions(updated);
+      localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+      setIsAddingNew(false);
+      setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' });
+    } catch (error) {
+      alert("Failed to add session to database. Please check your connection.");
+    }
   };
 
-  const handleAdminUpdateSession = (sessionId: string, updates: Partial<Session>) => {
-    const updated = sessions.map(s => s.id === sessionId ? { ...s, ...updates } : s);
-    setSessions(updated);
-    localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
-    setEditingSessionId(null);
-    setEditSessionBuffer({});
+  const handleAdminUpdateSession = async (sessionId: string, updates: Partial<Session>) => {
+    try {
+      await updateSession(sessionId, updates);
+      const updated = sessions.map(s => s.id === sessionId ? { ...s, ...updates } : s);
+      setSessions(updated);
+      localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+      setEditingSessionId(null);
+      setEditSessionBuffer({});
+    } catch (error) {
+      alert("Failed to update session in database.");
+    }
   };
 
   const handleAdminUpdateUser = (uid: string, updates: Partial<UserRecord>) => {
@@ -452,11 +579,16 @@ function App() {
       setEditingUserId(null);
   };
 
-  const handleAdminDeleteSession = (sessionId: string) => {
+  const handleAdminDeleteSession = async (sessionId: string) => {
     if (!confirm("Confirm removal from curriculum?")) return;
-    const updated = sessions.filter(s => s.id !== sessionId);
-    setSessions(updated);
-    localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+    try {
+      await deleteSession(sessionId);
+      const updated = sessions.filter(s => s.id !== sessionId);
+      setSessions(updated);
+      localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+    } catch (error) {
+      alert("Failed to delete session from database.");
+    }
   };
 
   const handleToggleScholarLink = (sessionId: string, scholarEmail: string) => {
@@ -484,7 +616,36 @@ function App() {
           <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'sessions' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Sessions</button>
           <button onClick={() => { setActiveView('fellowship'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'fellowship' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Fellowship</button>
           {(currentUser?.isAdmin || currentUser?.email?.toLowerCase() === ADMIN_EMAIL) && (
-            <button onClick={() => setModalType('admin')} className="text-[#C5A059] font-bold bg-[#C5A059]/10 px-4 py-1.5 rounded-full hover:bg-[#C5A059]/20 transition">Admin Dashboard</button>
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={async () => {
+                  if (!isCloudActive) {
+                    alert("You are in Local Preview Mode. Please sign in with your Google account to sync to the cloud.");
+                    handleGoogleAuth();
+                    return;
+                  }
+                  if (!confirm("Push all current sessions to the cloud?")) return;
+                  try {
+                    for (const s of sessions) {
+                      await addSession(s);
+                    }
+                    alert("Cloud Sync Complete. Your changes are now global.");
+                  } catch (e) {
+                    alert("Sync failed. Please check your connection.");
+                  }
+                }}
+                className="bg-emerald-600 text-white px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.1em] hover:bg-emerald-700 transition shadow-[0_4px_12px_rgba(16,185,129,0.3)] flex items-center gap-2 animate-pulse"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>
+                Sync Now
+              </button>
+              <button 
+                onClick={() => setModalType('admin')} 
+                className="text-white font-bold bg-[#C5A059] px-5 py-2 rounded-full hover:bg-[#B48F48] transition shadow-lg text-[10px] uppercase tracking-widest"
+              >
+                Admin Dashboard
+              </button>
+            </div>
           )}
         </div>
         <div>
@@ -515,13 +676,11 @@ function App() {
                   </span>
                 </div>
                 <h1 className="text-5xl md:text-8xl mt-4 mb-8 leading-tight font-playfair font-bold text-[#1A2238]">
-                  Peer-led learning, <br className="hidden md:block" />
-                  <span className="italic font-normal text-[#C5A059]">redefined.</span>
+                  {siteSettings.heroTitle.split(',')[0]}, <br className="hidden md:block" />
+                  <span className="italic font-normal text-[#C5A059]">{siteSettings.heroTitle.split(',')[1] || siteSettings.heroSubtitle}</span>
                 </h1>
                 <p className="text-lg md:text-xl text-gray-500 max-w-2xl mx-auto mb-12 leading-relaxed font-light">
-                  A peer-led platform powered by students from India’s top IITs and IIMs.
-                  <br />
-                  Practical strategies, not textbook theory.
+                  {siteSettings.heroDescription}
                 </p>
                 <div className="flex flex-col sm:flex-row justify-center gap-6">
                   <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className="bg-[#1A2238] text-white px-10 py-4 rounded-2xl font-bold text-sm tracking-widest uppercase hover:scale-105 transition shadow-xl active:scale-95">
@@ -617,8 +776,8 @@ function App() {
 
         {activeView === 'community' && (
           <div className="animate-in text-center py-32">
-            <h2 className="text-4xl font-playfair font-bold text-[#1A2238]">Community Dialogue Hub</h2>
-            <p className="text-gray-400 mt-4 font-light">Peer-to-peer discussion boards are initializing for current scholars.</p>
+            <h2 className="text-4xl font-playfair font-bold text-[#1A2238]">{siteSettings.communityTitle}</h2>
+            <p className="text-gray-400 mt-4 font-light max-w-2xl mx-auto px-6">{siteSettings.communityDescription}</p>
           </div>
         )}
 
@@ -656,10 +815,9 @@ function App() {
         {activeView === 'fellowship' && (
           <div className="animate-in max-w-4xl mx-auto px-6 py-24">
             <div className="text-center mb-20">
-              <h2 className="text-5xl md:text-7xl font-playfair font-bold text-[#1A2238] mb-8">Gyaan.one Fellowship</h2>
+              <h2 className="text-5xl md:text-7xl font-playfair font-bold text-[#1A2238] mb-8">{siteSettings.fellowshipTitle}</h2>
               <p className="text-lg md:text-xl text-gray-500 leading-relaxed font-light max-w-3xl mx-auto">
-                The Gyaan.one Fellowship is a highly selective program for individuals who want to play a meaningful role in shaping ambitious students. 
-                Fellows become key contributors to our academic community and work closely with the core team to create real impact.
+                {siteSettings.fellowshipDescription}
               </p>
             </div>
 
@@ -696,7 +854,7 @@ function App() {
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex flex-col md:flex-row justify-between items-center gap-8">
             <div className="text-xs text-gray-400 font-medium">
-              © 2026 Gyaan.one. All rights reserved.
+              {siteSettings.footerText}
             </div>
             <div className="flex gap-8 text-[10px] uppercase tracking-widest font-bold text-gray-400">
               <button onClick={() => { setActiveView('landing'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Home</button>
@@ -830,12 +988,12 @@ function App() {
       </Modal>
 
       {/* ADMIN DASHBOARD */}
-      <Modal isOpen={modalType === 'admin'} onClose={() => { setModalType(null); setAdminTab('insights'); setEditingSessionId(null); setEditingUserId(null); }} title="Administrator Intelligence Board" size="xl">
+      <Modal isOpen={modalType === 'admin'} onClose={() => { setModalType(null); setAdminTab('insights'); setEditingSessionId(null); setEditingUserId(null); }} title="Administrator Intelligence Board (v1.1)" size="xl">
         <div className="flex flex-col md:flex-row gap-8 min-h-[600px] text-[#1A2238]">
           <div className="w-full md:w-64 space-y-2 border-r border-gray-50 pr-6">
-            {['insights', 'scholars', 'fellowship', 'founding', 'curriculum'].map(tab => (
+            {['insights', 'scholars', 'fellowship', 'founding', 'curriculum', 'settings'].map(tab => (
               <button key={tab} onClick={() => { setAdminTab(tab as any); setEditingSessionId(null); setEditingUserId(null); }} className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition ${adminTab === tab ? 'bg-[#1A2238] text-white shadow-lg' : 'text-gray-400 hover:bg-gray-50'}`}>
-                {tab === 'scholars' ? 'Scholars Registry' : tab === 'founding' ? 'Founding Cohort' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'scholars' ? 'Scholars Registry' : tab === 'founding' ? 'Founding Cohort' : tab === 'settings' ? 'Site Settings' : tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
             ))}
           </div>
@@ -843,6 +1001,54 @@ function App() {
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             {adminTab === 'insights' && (
               <div className="animate-in space-y-12">
+                {/* Cloud Sync Status */}
+                <div className={`p-8 rounded-[2.5rem] border-2 flex flex-col md:flex-row items-center justify-between gap-6 ${isCloudActive ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div className="flex items-center gap-6">
+                    <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-inner ${isCloudActive ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
+                      {isCloudActive ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                      )}
+                    </div>
+                    <div>
+                      <h4 className={`text-xl font-black uppercase tracking-tighter ${isCloudActive ? 'text-emerald-800' : 'text-amber-800'}`}>
+                        {isCloudActive ? 'Cloud Sync Active' : 'Local Preview Mode'}
+                      </h4>
+                      <p className="text-xs text-gray-500 font-medium max-w-md">
+                        {isCloudActive 
+                          ? 'Your connection to Firestore is established. All changes made to sessions, scholars, or applications will be synchronized globally in real-time.' 
+                          : 'You are currently viewing a local sandbox. Changes made here will NOT be visible to other users until you sign in with the administrator account.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                    <button onClick={handleHardRefresh} className="bg-white text-gray-400 px-6 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest border border-gray-200 hover:bg-gray-50 transition shadow-sm">Hard Refresh</button>
+                    {isCloudActive ? (
+                      <button 
+                        onClick={async () => {
+                          if (!confirm("Push all current sessions to the cloud? This will overwrite existing cloud data with your current local state.")) return;
+                          try {
+                            for (const s of sessions) {
+                              await addSession(s);
+                            }
+                            alert("Cloud Sync Complete. All devices will now see these changes.");
+                          } catch (e) {
+                            alert("Sync failed. Check console for details.");
+                          }
+                        }}
+                        className="bg-emerald-600 text-white px-10 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-emerald-700 transition shadow-[0_8px_20px_rgba(16,185,129,0.4)] active:scale-95"
+                      >
+                        Sync Now
+                      </button>
+                    ) : (
+                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-10 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-amber-700 transition shadow-[0_8px_20px_rgba(245,158,11,0.4)] active:scale-95">
+                        Sign in to Sync
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-6">
                   {[
                     { label: 'Global Scholars', val: userList.length },
@@ -1079,7 +1285,25 @@ function App() {
               <div className="animate-in space-y-8">
                 <div className="flex justify-between items-center">
                   <h3 className="text-xl font-playfair font-bold">Curriculum Control</h3>
-                  <button onClick={() => setIsAddingNew(!isAddingNew)} className="bg-[#1A2238] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#7FB5B5] transition">{isAddingNew ? 'Cancel' : 'Add Session'}</button>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={async () => {
+                        if (!isCloudActive) {
+                          alert("You are in Local Preview Mode. Please sign in with your Google account (top right or in Insights tab) to sync to the cloud.");
+                          return;
+                        }
+                        if (!confirm("This will push all current sessions to the cloud. Continue?")) return;
+                        for (const s of sessions) {
+                          await addSession(s);
+                        }
+                        alert("Cloud Sync Complete.");
+                      }}
+                      className="bg-[#C5A059] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#B48F48] transition"
+                    >
+                      Force Cloud Sync
+                    </button>
+                    <button onClick={() => setIsAddingNew(!isAddingNew)} className="bg-[#1A2238] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#7FB5B5] transition">{isAddingNew ? 'Cancel' : 'Add Session'}</button>
+                  </div>
                 </div>
 
                 {isAddingNew && (
@@ -1221,6 +1445,116 @@ function App() {
                       )}
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {adminTab === 'settings' && (
+              <div className="animate-in space-y-8">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xl font-playfair font-bold">Global Site Settings</h3>
+                  <button 
+                    onClick={async () => {
+                      if (!isCloudActive) {
+                        alert("Please sign in with your administrator account to save changes globally.");
+                        return;
+                      }
+                      try {
+                        await updateSiteSettings(editSettingsBuffer);
+                        setSiteSettings(editSettingsBuffer);
+                        alert("Site settings updated globally.");
+                      } catch (e) {
+                        alert("Update failed. Check console for details.");
+                      }
+                    }}
+                    className="bg-[#1A2238] text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-[#7FB5B5] transition-all shadow-lg active:scale-95"
+                  >
+                    Save Global Changes
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-6 bg-gray-50 p-8 rounded-[2.5rem] border border-gray-100">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#C5A059]">Hero Section</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Title (Use comma for italic part)</label>
+                        <input 
+                          value={editSettingsBuffer.heroTitle} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, heroTitle: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Subtitle (Fallback)</label>
+                        <input 
+                          value={editSettingsBuffer.heroSubtitle} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, heroSubtitle: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Hero Description</label>
+                        <textarea 
+                          value={editSettingsBuffer.heroDescription} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, heroDescription: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm h-32 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 bg-gray-50 p-8 rounded-[2.5rem] border border-gray-100">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#C5A059]">Community & Fellowship</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Community Title</label>
+                        <input 
+                          value={editSettingsBuffer.communityTitle} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, communityTitle: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Community Description</label>
+                        <textarea 
+                          value={editSettingsBuffer.communityDescription} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, communityDescription: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm h-24 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Fellowship Title</label>
+                        <input 
+                          value={editSettingsBuffer.fellowshipTitle} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, fellowshipTitle: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Fellowship Description</label>
+                        <textarea 
+                          value={editSettingsBuffer.fellowshipDescription} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, fellowshipDescription: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm h-24 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-span-1 md:col-span-2 space-y-6 bg-gray-50 p-8 rounded-[2.5rem] border border-gray-100">
+                    <h4 className="text-xs font-bold uppercase tracking-widest text-[#C5A059]">Footer & Global</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <label className="text-[9px] uppercase font-bold text-gray-400 ml-1">Footer Copyright Text</label>
+                        <input 
+                          value={editSettingsBuffer.footerText} 
+                          onChange={e => setEditSettingsBuffer({...editSettingsBuffer, footerText: e.target.value})}
+                          className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5]"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1367,7 +1701,14 @@ function App() {
         </form>
       </Modal>
 
-      <Concierge />
+      <Concierge 
+        currentUser={currentUser} 
+        ADMIN_EMAIL={ADMIN_EMAIL} 
+        isCloudActive={isCloudActive} 
+        handleGoogleAuth={handleGoogleAuth} 
+        sessions={sessions} 
+        addSession={addSession} 
+      />
 
       {/* SUCCESS MESSAGE OVERLAY */}
       {showSuccess && (

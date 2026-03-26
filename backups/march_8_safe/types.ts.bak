@@ -72,18 +72,6 @@ export interface FoundingCohortApplication {
   submittedAt: string;
 }
 
-export interface SiteSettings {
-  heroTitle: string;
-  heroSubtitle: string;
-  heroDescription: string;
-  communityTitle: string;
-  communityDescription: string;
-  fellowshipTitle: string;
-  fellowshipDescription: string;
-  footerText: string;
-  lastUpdated?: number;
-}
-
 export interface AdminLog {
   id: string;
   adminUid: string;

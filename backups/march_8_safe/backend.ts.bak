@@ -29,20 +29,30 @@ import {
   addDoc
 } from "firebase/firestore";
 import { getAnalytics, logEvent } from "firebase/analytics";
-import { UserRecord, UserRole, Session, FellowshipApplication, FoundingCohortApplication, Review, AdminLog, AnalyticsSnapshot, SiteSettings } from "../types";
-import firebaseConfig from "../firebase-applet-config.json";
+import { UserRecord, UserRole, Session, FellowshipApplication, FoundingCohortApplication, Review, AdminLog, AnalyticsSnapshot } from "../types";
+
+// PROD CONFIG: Use environment variables for client-side access
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+};
 
 // Validation to prevent white screen on missing config
-const isFirebaseConfigValid = !!firebaseConfig.apiKey;
+const isFirebaseConfigValid = firebaseConfig.apiKey && firebaseConfig.apiKey !== "undefined" && firebaseConfig.apiKey !== "";
 
 if (!isFirebaseConfigValid) {
-  console.error("Firebase API Key is missing. Firebase features will be disabled.");
+  console.error("Firebase API Key is missing. Check your GitHub Secrets. Firebase features will be disabled.");
 }
 
 // Initialize Firebase only if config is valid to prevent crash
 const app = isFirebaseConfigValid ? initializeApp(firebaseConfig) : null;
 export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app, firebaseConfig.firestoreDatabaseId) : null;
+export const db = app ? getFirestore(app) : null;
 export const analytics = (app && typeof window !== "undefined") ? getAnalytics(app) : null;
 
 /* AUTHENTICATION SYSTEM */
@@ -73,8 +83,7 @@ export const loginWithGoogle = () => {
   if (!auth) return Promise.reject("Auth not initialized");
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  console.log("Starting Google Sign-In with Popup...");
-  return signInWithPopup(auth, provider);
+  return signInWithRedirect(auth, provider);
 };
 
 /* DATABASE WRAPPERS */
@@ -179,79 +188,6 @@ export const updateApplicationStatus = async (collectionName: string, id: string
   await updateDoc(ref, { status });
 };
 
-/* SITE SETTINGS MANAGEMENT */
-
-export const getSiteSettings = async (): Promise<SiteSettings | null> => {
-  if (!db) return null;
-  try {
-    const d = await getDoc(doc(db, "site_settings", "global"));
-    return d.exists() ? (d.data() as SiteSettings) : null;
-  } catch (error) {
-    console.error("Error fetching site settings:", error);
-    return null;
-  }
-};
-
-export const updateSiteSettings = async (settings: Partial<SiteSettings>) => {
-  if (!db) return;
-  try {
-    const ref = doc(db, "site_settings", "global");
-    await setDoc(ref, { ...settings, lastUpdated: Date.now() }, { merge: true });
-    console.log("Site settings updated in Firestore");
-  } catch (error) {
-    console.error("Error updating site settings:", error);
-    throw error;
-  }
-};
-
-/* SESSION MANAGEMENT */
-
-export const getSessions = async (): Promise<Session[]> => {
-  if (!db) return [];
-  try {
-    const snap = await getDocs(collection(db, "sessions"));
-    return snap.docs.map(d => d.data() as Session);
-  } catch (error) {
-    console.error("Error fetching sessions:", error);
-    return [];
-  }
-};
-
-export const updateSession = async (sessionId: string, updates: Partial<Session>) => {
-  if (!db) return;
-  try {
-    const ref = doc(db, "sessions", sessionId);
-    await updateDoc(ref, updates);
-    console.log("Session updated in Firestore");
-  } catch (error) {
-    console.error("Error updating session:", error);
-    throw error;
-  }
-};
-
-export const addSession = async (session: Session) => {
-  if (!db) return;
-  try {
-    await setDoc(doc(db, "sessions", session.id), session);
-    console.log("Session added to Firestore");
-  } catch (error) {
-    console.error("Error adding session:", error);
-    throw error;
-  }
-};
-
-export const deleteSession = async (sessionId: string) => {
-  if (!db) return;
-  try {
-    const { deleteDoc } = await import("firebase/firestore");
-    await deleteDoc(doc(db, "sessions", sessionId));
-    console.log("Session deleted from Firestore");
-  } catch (error) {
-    console.error("Error deleting session:", error);
-    throw error;
-  }
-};
-
 /* ADMIN DASHBOARD SERVICES */
 
 export const getAdminMetrics = async (): Promise<AnalyticsSnapshot> => {
@@ -297,25 +233,3 @@ export const logAdminAction = async (admin: UserRecord, action: string, targetId
   };
   await addDoc(collection(db, "admin_logs"), log);
 };
-
-/* SECURITY RULES DOCUMENTATION (Apply in Firebase Console)
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
-    }
-    match /site_settings/{settingId} {
-      allow read: if true;
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-    match /sessions/{sessionId} {
-      allow read: if request.auth != null;
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-    match /admin_logs/{logId} {
-      allow read, write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-  }
-}
-*/
