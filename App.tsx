@@ -61,8 +61,8 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, size = 
 };
 
 const DEFAULT_SITE_SETTINGS: SiteSettings = {
-  heroTitle: "Peer-led learning,",
-  heroSubtitle: "redefined.",
+  heroTitle: "Peer-to-Peer Learning,",
+  heroSubtitle: "Democratizing Knowledge",
   heroDescription: "A peer-led platform powered by students from India’s top IITs and IIMs.\nPractical strategies, not textbook theory.",
   communityTitle: "Community Dialogue Hub",
   communityDescription: "Peer-to-peer discussion boards are initializing for current scholars.",
