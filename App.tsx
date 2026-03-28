@@ -107,17 +107,11 @@ function App() {
     
     setTimeout(() => {
       setShowSuccess(false);
-      setActiveView('landing');
-      // Reset to defaults after hiding
-      setTimeout(() => {
-        setSuccessTitle('Application Received');
-        setSuccessMessage('Thanks for showing interest at gyaan.one, we will get back to you shortly.');
-      }, 500);
     }, 3000);
   };
 
-  const triggerError = (message: string) => {
-    setErrorMessage(message);
+  const triggerError = (title: string, message?: string) => {
+    setErrorMessage(message || title);
     setShowError(true);
     setTimeout(() => setShowError(false), 5000);
   };
@@ -143,7 +137,7 @@ function App() {
 
   const [logoClicks, setLogoClicks] = useState(0);
   const [recentActivity, setRecentActivity] = useState<{id: string, type: string, user: string, time: string}[]>([]);
-  const isCloudActive = currentUser && currentUser.uid !== 'admin-vault-id' && currentUser.email?.toLowerCase() === ADMIN_EMAIL;
+  const isCloudActive = currentUser && currentUser.email?.toLowerCase() === ADMIN_EMAIL;
 
   const handleHardRefresh = () => {
     localStorage.clear();
@@ -356,26 +350,11 @@ function App() {
     }
 
     if (newClicks >= 5) {
-      // Check if already authenticated as admin
-      if (currentUser?.email?.toLowerCase() === ADMIN_EMAIL) {
-        setModalType('admin');
-        setLogoClicks(0);
-        return;
-      }
-
-      // Fallback to local admin mode for preview
-      const adminUser: UserRecord = {
-        uid: 'admin-vault-id',
-        email: ADMIN_EMAIL,
-        name: 'Siraaj (Admin - Preview Mode)',
-        date: new Date().toLocaleDateString(),
-        role: 'admin',
-        isAdmin: true
-      };
-      setCurrentUser(adminUser);
-      localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
-      setModalType('admin');
       setLogoClicks(0);
+      setModalType('admin');
+      if (currentUser?.email?.toLowerCase() !== ADMIN_EMAIL) {
+        triggerError("Admin Access Restricted", "Please sign in with the administrator account to save changes globally.");
+      }
     }
   };
 
@@ -565,35 +544,43 @@ function App() {
     };
     
     try {
-      if (isCloudActive) {
-        await addSession(sessionToAdd);
-      }
       const updated = [sessionToAdd, ...sessions];
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
       setIsAddingNew(false);
       setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' });
-      triggerSuccess("Session Published", "The new session has been added to the curriculum.");
+      
+      if (isCloudActive) {
+        await addSession(sessionToAdd);
+        triggerSuccess("Session Published Globally", "The new session has been added to the cloud.");
+      } else {
+        triggerError("Saved Locally Only", "Sign in as admin to sync changes globally.");
+      }
     } catch (error) {
       console.error("Add session error:", error);
-      triggerError("Failed to add session to database. Please check your connection.");
+      triggerError("Failed to add session. Check your connection.");
     }
   };
 
   const handleAdminUpdateSession = async (sessionId: string, updates: Partial<Session>) => {
     try {
-      if (isCloudActive) {
-        await updateSession(sessionId, updates);
-      }
+      // Always update local state immediately for responsiveness
       const updated = sessions.map(s => s.id === sessionId ? { ...s, ...updates } : s);
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+      
+      if (isCloudActive) {
+        await updateSession(sessionId, updates);
+        triggerSuccess("Changes Saved Globally", "The session details have been updated in the cloud.");
+      } else {
+        triggerError("Saved Locally Only", "Sign in as admin to sync changes globally.");
+      }
+      
       setEditingSessionId(null);
       setEditSessionBuffer({});
-      triggerSuccess("Changes Saved", "The session details have been updated.");
     } catch (error) {
       console.error("Update session error:", error);
-      triggerError("Failed to update session in database.");
+      triggerError("Failed to update session. Check your connection.");
     }
   };
 
@@ -606,16 +593,19 @@ function App() {
 
   const handleAdminDeleteSession = async (sessionId: string) => {
     try {
-      if (isCloudActive) {
-        await deleteSession(sessionId);
-      }
       const updated = sessions.filter(s => s.id !== sessionId);
       setSessions(updated);
       localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
-      triggerSuccess("Session Deleted", "The session has been removed from the curriculum.");
+      
+      if (isCloudActive) {
+        await deleteSession(sessionId);
+        triggerSuccess("Session Deleted Globally", "The session has been removed from the cloud.");
+      } else {
+        triggerError("Deleted Locally Only", "Sign in as admin to sync changes globally.");
+      }
     } catch (error) {
       console.error("Delete session error:", error);
-      triggerError("Failed to delete session from database.");
+      triggerError("Failed to delete session. Check your connection.");
     }
   };
 
@@ -637,52 +627,31 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col relative bg-[#FDFBF7]">
       <nav className="flex justify-between items-center px-6 md:px-12 py-6 sticky top-0 bg-[#FDFBF7]/90 backdrop-blur-md z-40 border-b border-gray-50">
-        <div className="text-2xl font-bold tracking-tighter font-playfair text-[#1A2238] cursor-pointer select-none" onClick={handleLogoClick}>GYAAN.ONE</div>
+        <div className="text-2xl font-bold tracking-tighter font-playfair text-[#1A2238] cursor-pointer select-none" onClick={handleLogoClick} title="Click 5 times for Admin">GYAAN.ONE</div>
         <div className="hidden md:flex space-x-10 text-xs uppercase tracking-widest font-semibold text-gray-500">
           <button onClick={() => { setActiveView('landing'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'landing' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Home</button>
           <button onClick={() => { setActiveView('community'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'community' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Community</button>
           <button onClick={() => { setActiveView('sessions'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'sessions' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Sessions</button>
           <button onClick={() => { setActiveView('fellowship'); window.scrollTo({top:0, behavior:'smooth'}); }} className={`transition-all ${activeView === 'fellowship' ? 'text-[#1A2238] font-bold border-b-2 border-[#C5A059] pb-1' : 'hover:text-[#1A2238]'}`}>Fellowship</button>
-          {(currentUser?.isAdmin || currentUser?.email?.toLowerCase() === ADMIN_EMAIL) && (
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={async () => {
-                  if (!isCloudActive) {
-                    alert("You are in Local Preview Mode. Please sign in with your Google account to sync to the cloud.");
-                    handleGoogleAuth();
-                    return;
-                  }
-                  if (!confirm("Push all current sessions to the cloud?")) return;
-                  try {
-                    for (const s of sessions) {
-                      await addSession(s);
-                    }
-                    alert("Cloud Sync Complete. Your changes are now global.");
-                  } catch (e) {
-                    alert("Sync failed. Please check your connection.");
-                  }
-                }}
-                className="bg-emerald-600 text-white px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-[0.1em] hover:bg-emerald-700 transition shadow-[0_4px_12px_rgba(16,185,129,0.3)] flex items-center gap-2 animate-pulse"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>
-                Sync Now
-              </button>
-              <button 
-                onClick={() => setModalType('admin')} 
-                className="text-white font-bold bg-[#C5A059] px-5 py-2 rounded-full hover:bg-[#B48F48] transition shadow-lg text-[10px] uppercase tracking-widest"
-              >
-                Admin Dashboard
-              </button>
-            </div>
+          {currentUser && (currentUser.isAdmin || currentUser.email.toLowerCase() === ADMIN_EMAIL) && (
+            <button onClick={() => setModalType('admin')} className="text-[#C5A059] font-bold hover:text-[#1A2238] transition-all flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#C5A059] animate-pulse" />
+              Dashboard
+            </button>
           )}
         </div>
         <div>
           {currentUser ? (
             <div className="flex items-center gap-4">
               <div className="flex flex-col items-end">
-                <span className="text-[10px] uppercase font-bold text-gray-400">Hi, {currentUser.name}</span>
+                <div className="flex items-center gap-1.5">
+                  {(currentUser.isAdmin || currentUser.email.toLowerCase() === ADMIN_EMAIL) && (
+                    <span className="bg-[#C5A059] text-white text-[8px] px-1.5 py-0.5 rounded font-black tracking-tighter animate-pulse">ADMIN</span>
+                  )}
+                  <span className="text-[10px] uppercase font-bold text-gray-400">Hi, {currentUser.name}</span>
+                </div>
                 {(currentUser.isAdmin || currentUser.email.toLowerCase() === ADMIN_EMAIL) && (
-                  <span className="text-[8px] bg-[#C5A059]/10 text-[#C5A059] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter">Administrator</span>
+                  <button onClick={() => setModalType('admin')} className="text-[8px] bg-[#C5A059]/10 text-[#C5A059] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter hover:bg-[#C5A059]/20 transition">Administrator Dashboard</button>
                 )}
               </div>
               <button onClick={handleLogout} className="text-xs font-bold text-red-400 hover:text-red-600">Logout</button>
@@ -831,6 +800,13 @@ function App() {
                   <SessionCard 
                     key={session.id} 
                     session={session} 
+                    isAdmin={currentUser?.email?.toLowerCase() === ADMIN_EMAIL}
+                    onEdit={(s) => {
+                      setAdminTab('curriculum');
+                      setEditingSessionId(s.id);
+                      setEditSessionBuffer(s);
+                      setModalType('admin');
+                    }}
                     onSelect={(s) => { setSelectedSession(s); setModalType('session'); }}
                     reviews={getSessionReviews(session.id)}
                   />
@@ -1017,6 +993,13 @@ function App() {
 
       {/* ADMIN DASHBOARD */}
       <Modal isOpen={modalType === 'admin'} onClose={() => { setModalType(null); setAdminTab('insights'); setEditingSessionId(null); setEditingUserId(null); }} title="Administrator Intelligence Board (v1.1)" size="xl">
+        <div className="mb-6 p-4 bg-[#C5A059]/5 border border-[#C5A059]/20 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-[#C5A059] animate-ping" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#C5A059]">Secure Administrator Session Active</span>
+          </div>
+          <span className="text-[10px] font-mono text-gray-400">{currentUser?.email}</span>
+        </div>
         <div className="flex flex-col md:flex-row gap-8 min-h-[600px] text-[#1A2238]">
           <div className="w-full md:w-64 space-y-2 border-r border-gray-50 pr-6">
             {['insights', 'scholars', 'fellowship', 'founding', 'curriculum', 'settings'].map(tab => (
@@ -1038,54 +1021,6 @@ function App() {
           <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
             {adminTab === 'insights' && (
               <div className="animate-in space-y-12">
-                {/* Cloud Sync Status */}
-                <div className={`p-8 rounded-[2.5rem] border-2 flex flex-col md:flex-row items-center justify-between gap-6 ${isCloudActive ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
-                  <div className="flex items-center gap-6">
-                    <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-inner ${isCloudActive ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'}`}>
-                      {isCloudActive ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
-                      ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                      )}
-                    </div>
-                    <div>
-                      <h4 className={`text-xl font-black uppercase tracking-tighter ${isCloudActive ? 'text-emerald-800' : 'text-amber-800'}`}>
-                        {isCloudActive ? 'Cloud Sync Active' : 'Local Preview Mode'}
-                      </h4>
-                      <p className="text-xs text-gray-500 font-medium max-w-md">
-                        {isCloudActive 
-                          ? 'Your connection to Firestore is established. All changes made to sessions, scholars, or applications will be synchronized globally in real-time.' 
-                          : 'You are currently viewing a local sandbox. Changes made here will NOT be visible to other users until you sign in with the administrator account.'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                    <button onClick={handleHardRefresh} className="bg-white text-gray-400 px-6 py-3 rounded-2xl text-[10px] font-bold uppercase tracking-widest border border-gray-200 hover:bg-gray-50 transition shadow-sm">Hard Refresh</button>
-                    {isCloudActive ? (
-                      <button 
-                        onClick={async () => {
-                          try {
-                            for (const s of sessions) {
-                              await addSession(s);
-                            }
-                            triggerSuccess("Cloud Sync Complete", "All devices will now see these changes.");
-                          } catch (e) {
-                            console.error("Sync error:", e);
-                            triggerError("Sync failed. Check console for details.");
-                          }
-                        }}
-                        className="bg-emerald-600 text-white px-10 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-emerald-700 transition shadow-[0_8px_20px_rgba(16,185,129,0.4)] active:scale-95"
-                      >
-                        Sync Now
-                      </button>
-                    ) : (
-                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-10 py-3 rounded-2xl text-[11px] font-black uppercase tracking-[0.15em] hover:bg-amber-700 transition shadow-[0_8px_20px_rgba(245,158,11,0.4)] active:scale-95">
-                        Sign in to Sync
-                      </button>
-                    )}
-                  </div>
-                </div>
-
                 <div className="grid grid-cols-2 gap-6">
                   {[
                     { label: 'Global Scholars', val: userList.length },
@@ -1323,29 +1258,6 @@ function App() {
                 <div className="flex justify-between items-center">
                   <h3 className="text-xl font-playfair font-bold">Curriculum Control</h3>
                   <div className="flex gap-2">
-                    {!isCloudActive && (
-                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition shadow-md">Sign In to Sync</button>
-                    )}
-                    <button 
-                      onClick={async () => {
-                        if (!isCloudActive) {
-                          triggerError("Please sign in with your administrator account to sync to the cloud.");
-                          return;
-                        }
-                        try {
-                          for (const s of sessions) {
-                            await addSession(s);
-                          }
-                          triggerSuccess("Cloud Sync Complete", "Curriculum has been pushed to the live database.");
-                        } catch (e) {
-                          console.error("Sync error:", e);
-                          triggerError("Sync failed. Check console for details.");
-                        }
-                      }}
-                      className="bg-[#C5A059] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#B48F48] transition"
-                    >
-                      Force Cloud Sync
-                    </button>
                     <button onClick={() => setIsAddingNew(!isAddingNew)} className="bg-[#1A2238] text-white px-5 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-[#7FB5B5] transition">{isAddingNew ? 'Cancel' : 'Add Session'}</button>
                   </div>
                 </div>
@@ -1505,13 +1417,10 @@ function App() {
                 <div className="flex justify-between items-center">
                   <h3 className="text-xl font-playfair font-bold">Global Site Settings</h3>
                   <div className="flex gap-2">
-                    {!isCloudActive && (
-                      <button onClick={handleGoogleAuth} className="bg-amber-600 text-white px-8 py-3 rounded-xl text-[10px] font-bold uppercase hover:bg-amber-700 transition shadow-md">Sign In to Sync</button>
-                    )}
                     <button 
                       onClick={async () => {
                         if (!isCloudActive) {
-                          triggerError("Please sign in with your administrator account to save changes globally.");
+                          triggerError("Please sign in with the administrator account to save changes globally.");
                           return;
                         }
                         try {
