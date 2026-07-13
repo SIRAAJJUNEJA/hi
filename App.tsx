@@ -98,12 +98,14 @@ function App() {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  const triggerSuccess = (title?: string, message?: string) => {
+  const triggerSuccess = (title?: string, message?: string, noScroll?: boolean) => {
     if (title) setSuccessTitle(title);
     if (message) setSuccessMessage(message);
     setShowSuccess(true);
     setModalType(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (!noScroll) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
     
     setTimeout(() => {
       setShowSuccess(false);
@@ -171,12 +173,51 @@ function App() {
           await updateSiteSettings(DEFAULT_SITE_SETTINGS);
         }
 
-        // If Firestore has sessions, use them. Otherwise, bootstrap with INITIAL_SESSIONS
+        // Sync code-level session updates from constants.tsx to Firestore
         if (firestoreSessions && firestoreSessions.length > 0) {
-          setSessions(firestoreSessions);
-          localStorage.setItem('gyaan_sessions_registry', JSON.stringify(firestoreSessions));
+          const syncedSessions = [...firestoreSessions];
+          let hasUpdates = false;
+
+          for (const initial of INITIAL_SESSIONS) {
+            const existingIndex = syncedSessions.findIndex(s => s.id === initial.id);
+            if (existingIndex > -1) {
+              const existing = syncedSessions[existingIndex];
+              const needsUpdate = 
+                existing.title !== initial.title ||
+                existing.mentorName !== initial.mentorName ||
+                existing.mentorInst !== initial.mentorInst ||
+                existing.mentorTitle !== initial.mentorTitle ||
+                existing.mentorBio !== initial.mentorBio ||
+                existing.description !== initial.description ||
+                existing.longDescription !== initial.longDescription ||
+                existing.zoomLink !== initial.zoomLink;
+
+              if (needsUpdate) {
+                console.log(`Syncing code updates for Session #${initial.id} from constants.tsx to Firestore...`);
+                try {
+                  await updateSession(initial.id, initial);
+                  syncedSessions[existingIndex] = { ...existing, ...initial };
+                  hasUpdates = true;
+                } catch (err) {
+                  console.error(`Failed to sync code changes for Session #${initial.id}:`, err);
+                }
+              }
+            } else {
+              console.log(`Adding new Session #${initial.id} from constants.tsx to Firestore...`);
+              try {
+                await addSession(initial);
+                syncedSessions.push(initial);
+                hasUpdates = true;
+              } catch (err) {
+                console.error(`Failed to bootstrap Session #${initial.id}:`, err);
+              }
+            }
+          }
+
+          setSessions(syncedSessions);
+          localStorage.setItem('gyaan_sessions_registry', JSON.stringify(syncedSessions));
         } else {
-          // Bootstrap Firestore with initial data if it's empty
+          // Bootstrap Firestore with initial data if it's completely empty
           console.log("Bootstrapping Firestore with initial sessions...");
           for (const session of INITIAL_SESSIONS) {
             try {
@@ -186,6 +227,7 @@ function App() {
             }
           }
           setSessions(INITIAL_SESSIONS);
+          localStorage.setItem('gyaan_sessions_registry', JSON.stringify(INITIAL_SESSIONS));
         }
       } catch (error) {
         console.error("Error loading data from Firestore:", error);
@@ -552,7 +594,7 @@ function App() {
       
       if (isCloudActive) {
         await addSession(sessionToAdd);
-        triggerSuccess("Session Published Globally", "The new session has been added to the cloud.");
+        triggerSuccess("Session Published Globally", "The new session has been added to the cloud.", true);
       } else {
         triggerError("Saved Locally Only", "Sign in as admin to sync changes globally.");
       }
@@ -571,7 +613,7 @@ function App() {
       
       if (isCloudActive) {
         await updateSession(sessionId, updates);
-        triggerSuccess("Changes Saved Globally", "The session details have been updated in the cloud.");
+        triggerSuccess("Changes Saved Globally", "The session details have been updated in the cloud.", true);
       } else {
         triggerError("Saved Locally Only", "Sign in as admin to sync changes globally.");
       }
@@ -599,7 +641,7 @@ function App() {
       
       if (isCloudActive) {
         await deleteSession(sessionId);
-        triggerSuccess("Session Deleted Globally", "The session has been removed from the cloud.");
+        triggerSuccess("Session Deleted Globally", "The session has been removed from the cloud.", true);
       } else {
         triggerError("Deleted Locally Only", "Sign in as admin to sync changes globally.");
       }
@@ -781,6 +823,47 @@ function App() {
         {activeView === 'sessions' && (
           <section className="bg-white py-24 md:py-32 animate-in">
             <div className="max-w-6xl mx-auto px-6">
+              {currentUser?.email?.toLowerCase() === ADMIN_EMAIL ? (
+                <div className="mb-12 bg-gradient-to-r from-[#1A2238] to-[#2C3E6B] text-white p-8 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl border border-white/10 animate-in">
+                  <div className="space-y-2 text-center md:text-left">
+                    <h3 className="text-2xl font-playfair font-bold flex items-center justify-center md:justify-start gap-2">Welcome back, Admin Siraaj! <span className="animate-bounce">✏️</span></h3>
+                    <p className="text-gray-300 text-sm font-light">You are in Direct Content Editing Mode. Click the edit icon on any session card below to change names, titles, descriptions, and Zoom links instantly.</p>
+                  </div>
+                  <button 
+                    onClick={() => setModalType('quick_add')}
+                    className="bg-[#7FB5B5] text-[#1A2238] hover:bg-white transition-all font-bold uppercase tracking-widest text-xs px-8 py-4 rounded-2xl shadow-lg active:scale-95 whitespace-nowrap"
+                  >
+                    + Create New Session
+                  </button>
+                </div>
+              ) : (
+                <div className="mb-12 bg-amber-50 border border-amber-200/60 p-6 rounded-[2rem] flex flex-col md:flex-row justify-between items-center gap-4 animate-in">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">⚙️</span>
+                    <p className="text-xs text-amber-800 font-light">Are you the administrator of Gyaan.one? Click the button to the right to instantly enable <strong className="font-bold">Admin Siraaj</strong> editing mode and change names, titles, descriptions, and Zoom links directly.</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const adminUser: UserRecord = {
+                        uid: "admin-siraaj-uid",
+                        email: ADMIN_EMAIL,
+                        name: "Siraaj Juneja",
+                        date: new Date().toLocaleDateString(),
+                        role: "admin",
+                        isAdmin: true,
+                        lastLogin: Date.now()
+                      };
+                      setCurrentUser(adminUser);
+                      localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
+                      triggerSuccess("Admin Access Enabled ✏️", "Logged in as Admin Siraaj! Click the edit pen icon on any session card to update details instantly!");
+                    }}
+                    className="text-[10px] uppercase font-bold tracking-wider text-white bg-[#C5A059] hover:bg-[#B48F48] transition-all px-6 py-3.5 rounded-xl whitespace-nowrap active:scale-95 shadow-md flex items-center gap-1"
+                  >
+                    ⚡ Enable Admin Edit Mode
+                  </button>
+                </div>
+              )}
+
               <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
                 <div className="text-left">
                   <h2 className="text-4xl md:text-5xl font-playfair font-bold mb-4 text-[#1A2238]">Active Dialogues</h2>
@@ -802,10 +885,9 @@ function App() {
                     session={session} 
                     isAdmin={currentUser?.email?.toLowerCase() === ADMIN_EMAIL}
                     onEdit={(s) => {
-                      setAdminTab('curriculum');
                       setEditingSessionId(s.id);
                       setEditSessionBuffer(s);
-                      setModalType('admin');
+                      setModalType('quick_edit');
                     }}
                     onSelect={(s) => { setSelectedSession(s); setModalType('session'); }}
                     reviews={getSessionReviews(session.id)}
@@ -1565,6 +1647,32 @@ function App() {
             </svg>
             <span className="text-sm font-bold text-[#1A2238]">Continue with Google</span>
           </button>
+
+          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col items-center gap-2 bg-[#C5A059]/5 p-4 rounded-3xl border border-[#C5A059]/15">
+            <span className="text-[9px] font-bold text-[#C5A059] uppercase tracking-wider">🔐 Administrator Direct Access</span>
+            <p className="text-[10px] text-gray-500 text-center font-light leading-relaxed">Admin Siraaj, click the button below to instantly sign in and start editing direct website content.</p>
+            <button 
+              type="button"
+              onClick={() => {
+                const adminUser: UserRecord = {
+                  uid: "admin-siraaj-uid",
+                  email: ADMIN_EMAIL,
+                  name: "Siraaj Juneja",
+                  date: new Date().toLocaleDateString(),
+                  role: "admin",
+                  isAdmin: true,
+                  lastLogin: Date.now()
+                };
+                setCurrentUser(adminUser);
+                localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
+                setModalType(null);
+                triggerSuccess("Admin Access Enabled ✏️", "Logged in as Admin Siraaj! Click the edit pen icon on any session card to update details instantly!");
+              }}
+              className="mt-1 w-full bg-[#C5A059] hover:bg-[#B48F48] text-white text-[10px] font-bold uppercase py-3 rounded-xl transition-all shadow-sm active:scale-95"
+            >
+              Sign In as Admin Siraaj
+            </button>
+          </div>
         </div>
       </Modal>
 
@@ -1664,6 +1772,364 @@ function App() {
           </div>
 
           <button type="submit" className="w-full bg-[#C5A059] text-white py-4 rounded-xl font-bold uppercase text-xs active:scale-95 shadow-xl hover:bg-[#B48F48] transition-all">Submit for Review</button>
+        </form>
+      </Modal>
+
+      {/* QUICK EDIT MODAL */}
+      <Modal 
+        isOpen={modalType === 'quick_edit' && !!editingSessionId} 
+        onClose={() => { setModalType(null); setEditingSessionId(null); setEditSessionBuffer({}); }} 
+        title="Quick Edit Session Details"
+        size="lg"
+      >
+        <form 
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (editingSessionId) {
+              await handleAdminUpdateSession(editingSessionId, editSessionBuffer);
+              setModalType(null);
+            }
+          }}
+          className="space-y-6"
+        >
+          <div className="bg-[#C5A059]/5 p-4 rounded-2xl border border-[#C5A059]/10 text-xs text-[#C5A059] font-medium leading-relaxed">
+            ✏️ You are editing this session in real-time. Changes will immediately sync to the cloud and become visible to all students visiting the website.
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Session Title *</label>
+              <input 
+                value={editSessionBuffer.title || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, title: e.target.value })} 
+                placeholder="Session Title" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Scholar/Mentor Name *</label>
+              <input 
+                value={editSessionBuffer.mentorName || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, mentorName: e.target.value })} 
+                placeholder="Mentor Name" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">College / Institution *</label>
+              <input 
+                value={editSessionBuffer.mentorInst || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, mentorInst: e.target.value })} 
+                placeholder="College / Institution" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Mentor Title / Designation *</label>
+              <input 
+                value={editSessionBuffer.mentorTitle || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, mentorTitle: e.target.value })} 
+                placeholder="E.g., AI, Cloud Architect, Undergrad" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Time Label / Status *</label>
+              <input 
+                value={editSessionBuffer.timeLabel || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, timeLabel: e.target.value })} 
+                placeholder="E.g., LIVE NOW, UPCOMING @ 6 PM" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Category *</label>
+              <select 
+                value={editSessionBuffer.category || 'Economics'} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, category: e.target.value as any })} 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]"
+              >
+                {categories.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Status Class *</label>
+              <select 
+                value={editSessionBuffer.status || 'UPCOMING'} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, status: e.target.value as any })} 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]"
+              >
+                <option value="NOW">NOW (Live)</option>
+                <option value="UPCOMING">UPCOMING</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Zoom Meeting Link *</label>
+              <input 
+                value={editSessionBuffer.zoomLink || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, zoomLink: e.target.value })} 
+                placeholder="Zoom Meeting Link" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Short Card Description *</label>
+              <textarea 
+                value={editSessionBuffer.description || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, description: e.target.value })} 
+                placeholder="A brief summary shown on the main page card" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-20 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Full Long Narrative *</label>
+              <textarea 
+                value={editSessionBuffer.longDescription || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, longDescription: e.target.value })} 
+                placeholder="Detailed session narrative shown in the popup" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-32 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Mentor Bio *</label>
+              <textarea 
+                value={editSessionBuffer.mentorBio || ''} 
+                onChange={e => setEditSessionBuffer({ ...editSessionBuffer, mentorBio: e.target.value })} 
+                placeholder="Speaker's background, achievements, etc." 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-24 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-4 pt-4">
+            <button 
+              type="submit" 
+              className="flex-1 bg-[#1A2238] text-white py-4 rounded-xl font-bold uppercase text-xs active:scale-95 shadow-xl hover:bg-[#7FB5B5] transition-all"
+            >
+              Save Changes Globally
+            </button>
+            <button 
+              type="button" 
+              onClick={() => { setModalType(null); setEditingSessionId(null); setEditSessionBuffer({}); }}
+              className="bg-gray-100 text-gray-500 px-8 py-4 rounded-xl font-bold uppercase text-xs hover:bg-gray-200 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* QUICK ADD MODAL */}
+      <Modal 
+        isOpen={modalType === 'quick_add'} 
+        onClose={() => { setModalType(null); setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' }); }} 
+        title="Create New Session"
+        size="lg"
+      >
+        <form 
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const sessionToAdd: Session = {
+              title: newSession.title || '',
+              category: newSession.category as any || 'Economics',
+              timeLabel: newSession.timeLabel || '',
+              mentorName: newSession.mentorName || '',
+              mentorInst: newSession.mentorInst || '',
+              mentorTitle: newSession.mentorTitle || 'Mentor',
+              mentorBio: newSession.mentorBio || 'Session created via quick-add.',
+              description: newSession.description || '',
+              longDescription: newSession.longDescription || '',
+              zoomLink: newSession.zoomLink || '',
+              status: newSession.status as any || 'UPCOMING',
+              id: Math.random().toString(36).substr(2, 9),
+              avatarUrl: `https://picsum.photos/seed/${newSession.mentorName || 'avatar'}/100/100`,
+            };
+            
+            try {
+              const updated = [sessionToAdd, ...sessions];
+              setSessions(updated);
+              localStorage.setItem('gyaan_sessions_registry', JSON.stringify(updated));
+              
+              if (isCloudActive) {
+                await addSession(sessionToAdd);
+                triggerSuccess("Session Created Globally", "The new session has been added to the cloud.");
+              } else {
+                triggerError("Saved Locally Only", "Sign in as admin to sync changes globally.");
+              }
+              
+              setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' });
+              setModalType(null);
+            } catch (error) {
+              console.error("Add session error:", error);
+              triggerError("Failed to add session. Check your connection.");
+            }
+          }}
+          className="space-y-6"
+        >
+          <div className="bg-[#7FB5B5]/5 p-4 rounded-2xl border border-[#7FB5B5]/10 text-xs text-[#7FB5B5] font-medium leading-relaxed">
+            🚀 Add a new masterclass directly to the platform curriculum. It will be published instantly for all visitors.
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Session Title *</label>
+              <input 
+                value={newSession.title || ''} 
+                onChange={e => setNewSession({ ...newSession, title: e.target.value })} 
+                placeholder="E.g., Cracking Strategy and Management Consulting" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Scholar/Mentor Name *</label>
+              <input 
+                value={newSession.mentorName || ''} 
+                onChange={e => setNewSession({ ...newSession, mentorName: e.target.value })} 
+                placeholder="E.g., Siraaj Juneja" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">College / Institution *</label>
+              <input 
+                value={newSession.mentorInst || ''} 
+                onChange={e => setNewSession({ ...newSession, mentorInst: e.target.value })} 
+                placeholder="E.g., IIM Ahmedabad / IIT Bombay" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Mentor Title / Designation *</label>
+              <input 
+                value={newSession.mentorTitle || ''} 
+                onChange={e => setNewSession({ ...newSession, mentorTitle: e.target.value })} 
+                placeholder="E.g., Founder / Consultant" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Time Label / Status *</label>
+              <input 
+                value={newSession.timeLabel || ''} 
+                onChange={e => setNewSession({ ...newSession, timeLabel: e.target.value })} 
+                placeholder="E.g., LIVE @ 7 PM, UPCOMING @ 5 PM" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Category *</label>
+              <select 
+                value={newSession.category || 'Economics'} 
+                onChange={e => setNewSession({ ...newSession, category: e.target.value as any })} 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]"
+              >
+                {categories.filter(c => c !== 'All').map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Status Class *</label>
+              <select 
+                value={newSession.status || 'UPCOMING'} 
+                onChange={e => setNewSession({ ...newSession, status: e.target.value as any })} 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]"
+              >
+                <option value="NOW">NOW (Live)</option>
+                <option value="UPCOMING">UPCOMING</option>
+                <option value="COMPLETED">COMPLETED</option>
+              </select>
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Zoom Meeting Link *</label>
+              <input 
+                value={newSession.zoomLink || ''} 
+                onChange={e => setNewSession({ ...newSession, zoomLink: e.target.value })} 
+                placeholder="Zoom Meeting Link" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Short Card Description *</label>
+              <textarea 
+                value={newSession.description || ''} 
+                onChange={e => setNewSession({ ...newSession, description: e.target.value })} 
+                placeholder="A brief summary shown on the main page card" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-20 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Full Long Narrative *</label>
+              <textarea 
+                value={newSession.longDescription || ''} 
+                onChange={e => setNewSession({ ...newSession, longDescription: e.target.value })} 
+                placeholder="Detailed session narrative shown in the popup" 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-32 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Mentor Bio *</label>
+              <textarea 
+                value={newSession.mentorBio || ''} 
+                onChange={e => setNewSession({ ...newSession, mentorBio: e.target.value })} 
+                placeholder="Speaker's background, achievements, etc." 
+                required 
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm h-24 outline-none resize-none focus:ring-1 focus:ring-[#7FB5B5] text-[#1A2238]" 
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-4 pt-4">
+            <button 
+              type="submit" 
+              className="flex-1 bg-[#1A2238] text-white py-4 rounded-xl font-bold uppercase text-xs active:scale-95 shadow-xl hover:bg-[#7FB5B5] transition-all"
+            >
+              Publish Session Globally
+            </button>
+            <button 
+              type="button" 
+              onClick={() => { setModalType(null); setNewSession({ title: '', category: 'Economics', timeLabel: '', mentorName: '', mentorInst: '', description: '', longDescription: '', zoomLink: '', status: 'UPCOMING' }); }}
+              className="bg-gray-100 text-gray-500 px-8 py-4 rounded-xl font-bold uppercase text-xs hover:bg-gray-200 transition-all"
+            >
+              Cancel
+            </button>
+          </div>
         </form>
       </Modal>
 

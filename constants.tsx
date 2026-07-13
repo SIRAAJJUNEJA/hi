@@ -8,7 +8,7 @@ export const INITIAL_SESSIONS: Session[] = [
     category: 'Economics',
     timeLabel: 'LIVE @ 6:00 PM',
     status: 'LIVE',
-    mentorName: 'Arjun Mehta',
+    mentorName: 'Arjun Metani',
     mentorInst: 'IIT Delhi',
     mentorTitle: 'Senior Research Scholar',
     mentorBio: 'Arjun is a doctoral candidate specializing in microeconomic theory and its applications in digital commerce. His research focuses on non-cooperative games in platform economies.',
@@ -36,7 +36,7 @@ export const INITIAL_SESSIONS: Session[] = [
   },
   {
     id: '3',
-    title: 'Y Combinator cracking guide',
+    title: 'Y Combinator Interview Cracking Guide 101',
     category: 'Engineering',
     timeLabel: 'LIVE NOW',
     status: 'NOW',
