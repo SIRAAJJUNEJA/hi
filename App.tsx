@@ -823,7 +823,7 @@ function App() {
         {activeView === 'sessions' && (
           <section className="bg-white py-24 md:py-32 animate-in">
             <div className="max-w-6xl mx-auto px-6">
-              {currentUser?.email?.toLowerCase() === ADMIN_EMAIL ? (
+              {currentUser?.email?.toLowerCase() === ADMIN_EMAIL && (
                 <div className="mb-12 bg-gradient-to-r from-[#1A2238] to-[#2C3E6B] text-white p-8 rounded-[2.5rem] flex flex-col md:flex-row justify-between items-center gap-6 shadow-xl border border-white/10 animate-in">
                   <div className="space-y-2 text-center md:text-left">
                     <h3 className="text-2xl font-playfair font-bold flex items-center justify-center md:justify-start gap-2">Welcome back, Admin Siraaj! <span className="animate-bounce">✏️</span></h3>
@@ -834,32 +834,6 @@ function App() {
                     className="bg-[#7FB5B5] text-[#1A2238] hover:bg-white transition-all font-bold uppercase tracking-widest text-xs px-8 py-4 rounded-2xl shadow-lg active:scale-95 whitespace-nowrap"
                   >
                     + Create New Session
-                  </button>
-                </div>
-              ) : (
-                <div className="mb-12 bg-amber-50 border border-amber-200/60 p-6 rounded-[2rem] flex flex-col md:flex-row justify-between items-center gap-4 animate-in">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xl">⚙️</span>
-                    <p className="text-xs text-amber-800 font-light">Are you the administrator of Gyaan.one? Click the button to the right to instantly enable <strong className="font-bold">Admin Siraaj</strong> editing mode and change names, titles, descriptions, and Zoom links directly.</p>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      const adminUser: UserRecord = {
-                        uid: "admin-siraaj-uid",
-                        email: ADMIN_EMAIL,
-                        name: "Siraaj Juneja",
-                        date: new Date().toLocaleDateString(),
-                        role: "admin",
-                        isAdmin: true,
-                        lastLogin: Date.now()
-                      };
-                      setCurrentUser(adminUser);
-                      localStorage.setItem('gyaan_active_user', JSON.stringify(adminUser));
-                      triggerSuccess("Admin Access Enabled ✏️", "Logged in as Admin Siraaj! Click the edit pen icon on any session card to update details instantly!");
-                    }}
-                    className="text-[10px] uppercase font-bold tracking-wider text-white bg-[#C5A059] hover:bg-[#B48F48] transition-all px-6 py-3.5 rounded-xl whitespace-nowrap active:scale-95 shadow-md flex items-center gap-1"
-                  >
-                    ⚡ Enable Admin Edit Mode
                   </button>
                 </div>
               )}
@@ -949,8 +923,16 @@ function App() {
               <button onClick={() => { setActiveView('fellowship'); window.scrollTo({top:0, behavior:'smooth'}); }} className="hover:text-[#1A2238] transition-colors">Fellowship</button>
             </div>
           </div>
-          <div className="mt-8 pt-8 border-t border-gray-50 text-center">
+          <div className="mt-8 pt-8 border-t border-gray-50 flex flex-col sm:flex-row justify-between items-center gap-4 text-center">
             <p className="text-[10px] uppercase tracking-[0.3em] font-bold text-gray-300">Built for the ambitious.</p>
+            {!currentUser && (
+              <button 
+                onClick={() => setModalType('auth')} 
+                className="text-[9px] text-gray-300 hover:text-gray-500 transition-colors uppercase tracking-widest font-medium"
+              >
+                Admin Access
+              </button>
+            )}
           </div>
         </div>
       </footer>
